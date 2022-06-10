@@ -1,3 +1,4 @@
+{% import 'macros/form.html' as macro %}
 {% asset 'ckanext-dataset-transfer/transfer-css' %}
 {% asset 'ckanext-dataset-transfer/transfer-js' %}
 <button type="button" class="btn btn-success" data-toggle="modal" data-target="#dataset_publish_modal">{{_('Publish to LUH')}}</button>
@@ -11,6 +12,32 @@
       </div>
       <div class="modal-body" id="dataset-publish-modal-body">
         <input type="hidden" id="org_list_call" value={{h.url_for('dataset_transfer.load_publish_form_data', package_id=pkg_dict.id, _external=True)}}>  
+         <div class="row" id="transfer_api_token_warpper">
+            <div class="alert alert-warning text-justify">
+                <p>
+                    {{_('Please note: We need your API token from LUH data repository to be able to publish your dataset.
+                        If you already stored your API token, you can skip this by clicking the checkbox.
+                    ')}}
+                </p>
+            </div>
+            <div class="col-sm-12">
+                {{ macro.input('api_token', 
+                    id='transfer_api_token_input', 
+                    label=_('Your LUH API Token'),                          
+                    classes=['control-medium'] ,
+                    placeholder="my api token is")
+                }}
+                <label class="checkbox-container">{{_('Use my existing API token.')}}                     
+                    <input type="checkbox" 
+                    class="token-exist-box"
+                    name="token_exist_box"  
+                    id="token_exist_box"
+                    >
+                    <span class="checkmark"></span>
+                </label> 
+            </div>
+        </div>
+        
         <div class="row" id="transfer_org_selection">
             <div class="col-sm-12">
                 <label for="dataset_transfer_org_list">{{_("Target Organization")}}</label>
