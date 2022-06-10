@@ -25,9 +25,9 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
         blueprint = Blueprint(self.name, self.__module__)
         blueprint.template_folder = u'templates'
         blueprint.add_url_rule(
-            u'/dataset_transfer/index',
-            u'index',
-            BaseController.index,
+            u'/dataset_transfer/load_publish_form_data/<package_id>',
+            u'load_publish_form_data',
+            BaseController.load_publish_form_data,
             methods=['GET']
             )
 
