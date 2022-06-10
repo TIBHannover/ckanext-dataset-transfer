@@ -1,0 +1,17 @@
+transfer-css:
+  output: ckanext-dataset-transfer/%(version)s_my.css
+  contents:
+    - transfer.css
+
+transfer-js:  
+  output: ckanext-dataset-transfer/%(version)s_my.js
+  extra:
+    preload:
+      - base/main
+      - vendor/vendor
+      - vendor/bootstrap
+      - vendor/jquery
+      - vendor/jquery.ui.core
+      - vendor/select2
+  contents:
+    - transfer.js

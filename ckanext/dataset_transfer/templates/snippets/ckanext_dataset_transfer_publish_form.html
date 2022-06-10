@@ -1,4 +1,5 @@
-
+{% asset 'ckanext-dataset-transfer/transfer-css' %}
+{% asset 'ckanext-dataset-transfer/transfer-js' %}
 <button type="button" class="btn btn-success" data-toggle="modal" data-target="#dataset_publish_modal">{{_('Publish to LUH')}}</button>
 
 <div id="dataset_publish_modal" class="modal fade" role="dialog">
@@ -8,14 +9,19 @@
         <button type="button" class="close" data-dismiss="modal">&times;</button>
         <h4 class="modal-title">{{_('Publish the dataset XXX to LUH data repository')}}</h4>
       </div>
-      <div class="modal-body">  
-
-
-
+      <div class="modal-body" id="dataset-publish-modal-body">
+        <input type="hidden" id="org_list_call" value={{h.url_for('dataset_transfer.load_publish_form_data', package_id=pkg_dict.id, _external=True)}}>  
+        <div class="row" id="transfer_org_selection">
+            <div class="col-sm-12">
+                <label for="dataset_transfer_org_list">{{_("Target Organization")}}</label>
+                <input type="text" id="dataset_transfer_org_list">    
+            </div>
+        </div>
+        
       </div>
       <div class="modal-footer">
-        <button id="ref_add_close_btn" type="button" class="btn btn-default" data-dismiss="modal">{{_('Close')}}</button>
-        <button id="ref_submit_btn" class="btn btn-primary">{{_('Publish')}}</button>
+        <button id="dataset_transfer_close_btn" type="button" class="btn btn-default" data-dismiss="modal">{{_('Close')}}</button>
+        <button id="dataset_transfer_submit_btn" class="btn btn-primary">{{_('Publish')}}</button>
       </div>
     </div>
 

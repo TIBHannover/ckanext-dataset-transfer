@@ -1,6 +1,6 @@
 # encoding: utf-8
 
-from email import header
+import json
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
 
@@ -20,7 +20,13 @@ class BaseController():
             if response.status_code != 200:
                 return '0'
             else:
-                return response.json()["result"]
+                data = []
+                for org in response.json()["result"]:
+                    temp = {}
+                    temp['value'] = response.json()["result"].index(org)
+                    temp['text'] = org
+                    data.append(temp)
+                return json.dumps(data)
         
         except:
             return 'error'
