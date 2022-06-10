@@ -11,7 +11,8 @@
         <h4 class="modal-title">{{_('Publish the dataset XXX to LUH data repository')}}</h4>
       </div>
       <div class="modal-body" id="dataset-publish-modal-body">
-        <input type="hidden" id="org_list_call" value={{h.url_for('dataset_transfer.load_publish_form_data', package_id=pkg_dict.id, _external=True)}}>  
+        <input type="hidden" id="org_list_call" value={{h.url_for('dataset_transfer.load_publish_form_data', _external=True)}}>  
+        <input type="hidden" id="package_id" value={{pkg_dict.id}}>  
          <div class="row" id="transfer_api_token_warpper">
             <div class="alert alert-warning text-justify">
                 <p>

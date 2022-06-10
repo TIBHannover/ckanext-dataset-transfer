@@ -3,14 +3,17 @@
 import json
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
+from flask import request
 
 
 class BaseController():
 
     base_url = "https://data-neu.uni-hannover.de/api/3/action/"
 
-    def load_publish_form_data(package_id):
+    def load_publish_form_data():
         try:
+            package_id = request.form.get('package_id')
+            api_token = request.form.get('api_token')
             if not Helper.check_access_edit_package(package_id):
                 return 'Not Authorized'
             
