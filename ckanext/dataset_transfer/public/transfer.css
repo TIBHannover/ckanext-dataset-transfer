@@ -2,6 +2,11 @@
     display: none;
 }
 
+#final_action_buttons{
+    display: none;
+}
+
+
 
 .checkbox-container {
     display: block;
