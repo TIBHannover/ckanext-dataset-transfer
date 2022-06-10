@@ -1,0 +1,9 @@
+{% ckan_extends %}
+
+{% block content_action %}
+{{ super() }}
+  {% set data_dict = {'id': pkg['id']} %}
+  {% if h.check_access('package_update', data_dict) %}
+      {% snippet "snippets/ckanext_dataset_transfer_publish_form.html", pkg_dict=pkg %}  
+  {% endif %}
+{% endblock %}
