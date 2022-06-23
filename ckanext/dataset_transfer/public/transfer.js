@@ -25,10 +25,13 @@ $(document).ready(function(){
      */
      $('#dataset_transfer_submit').click(function(){
         $('#publish_step3').hide();
+        $('#action_btn_part').hide();
         $('#publish_step_final').show();
         let dest_url = $('#publish_url').val();
+        let org_name = $('#dataset_transfer_org_list').select2('data').text;
         let formdata = new FormData();
         formdata.set('package_id', $('#package_id').val());
+        formdata.set('org', org_name);
         formdata.set('api_token', $("#transfer_api_token_input").val());
         let req = new XMLHttpRequest();
         req.onreadystatechange = function() {
