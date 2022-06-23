@@ -6,10 +6,13 @@
   text-decoration: underline;
 }
 
-#publish_step2, #publish_step1{
+#publish_step2, #publish_step3{
   display: none;
 }
 
+#dataset_transfer_submit{
+  display: none;
+}
 
 
 #final_action_buttons{

@@ -14,6 +14,8 @@ $(document).ready(function(){
             $('#publish_step2').hide();
             $('#publish_step3').show();
             $(this).attr("step", "4");
+            $(this).hide();
+            $('#dataset_transfer_submit').show();
         }
     });
 

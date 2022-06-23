@@ -38,5 +38,12 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
             BaseController.load_publish_form_data,
             methods=['POST']
             )
+        
+        blueprint.add_url_rule(
+            u'/dataset_transfer/publish',
+            u'publish',
+            BaseController.publish,
+            methods=['POST']
+            )
 
         return blueprint

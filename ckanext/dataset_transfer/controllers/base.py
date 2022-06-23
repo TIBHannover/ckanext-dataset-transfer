@@ -25,6 +25,17 @@ class BaseController():
 
 
 
+   
+    def publish():
+        '''
+            Publish a dataset.
+        '''
+
+
+        return '0'
+
+
+
 
     def load_publish_form_data():
         try:
