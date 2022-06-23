@@ -7,6 +7,13 @@ $(document).ready(function(){
         let step = $(this).attr("step");
         if( step === "2"){
             GoToStep2();
+            $(this).attr("step", "3");
+        }
+        else if (step === "3"){
+            $('#publish_step1').hide();
+            $('#publish_step2').hide();
+            $('#publish_step3').show();
+            $(this).attr("step", "4");
         }
     });
 

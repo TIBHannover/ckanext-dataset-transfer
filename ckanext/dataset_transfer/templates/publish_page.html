@@ -13,19 +13,19 @@
         </h2>
     </div>
     <br><br>
-    <div class="row">
-        <div class="col-sm-12">
-            <div class="alert alert-warning text-justify">
-                <p>
-                    {{_('Please note: We need your API token from LUH data repository to be able to publish your dataset.
-                        If you already stored your API token, you can skip this by clicking the checkbox.
-                    ')}}
-                </p>
+    <section id="publish_step1">
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="alert alert-info text-justify">
+                    <p>
+                        {{_('Please note: We need your API token from LUH data repository to be able to publish your dataset.
+                            If you already stored your API token, you can skip this by clicking the checkbox.
+                        ')}}
+                    </p>
+                </div>
             </div>
         </div>
-    </div>
-    <br><br>
-    <section id="publish_step1">
+        <br><br>
         <div class="row">
             <div class="col-sm-12">
                 {{ macro.input('api_token', 
@@ -46,10 +46,36 @@
         </div>
     </section>
     <section id="publish_step2">
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="alert alert-info text-justify">
+                    <p>
+                        {{_('Please select the owner organization on LUH that will own your dataset.')}}
+                    </p>
+                </div>
+            </div>
+        </div>
+        <br><br>
         <div class="row" id="transfer_org_selection">
             <div class="col-sm-12">
                 <label for="dataset_transfer_org_list">{{_("Target Organization")}}</label>
                 <input type="text" id="dataset_transfer_org_list">    
+            </div>
+        </div>
+    </section>
+    <section id="publish_step3">
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="alert alert-info text-justify">
+                    <p>
+                        {{_('Please check your dataset metadata before publishing.')}}
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-sm-12">
+                {% snippet "snippets/publish_dataset_metadata_table.html", dataset=pkg_dict %}  
             </div>
         </div>
     </section>
