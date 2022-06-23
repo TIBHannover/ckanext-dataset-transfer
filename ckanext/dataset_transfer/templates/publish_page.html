@@ -1,6 +1,67 @@
 {% extends "package/read.html" %}
-{# {% import 'macros/form.html' as macro %} #}
+{% import 'macros/form.html' as macro %}
 
 {% block primary_content_inner %}
-    ooooo
+    {% asset 'ckanext-dataset-transfer/transfer-css' %}
+    {% asset 'ckanext-dataset-transfer/transfer-js' %}
+
+    <div class="row">
+        <h2 class="modal-title">{{
+            _('Publish the dataset <span id="publish_page_dataset_name_in_title">' ~ pkg_dict.name ~ '</span> to LUH data repository')
+            }}
+        </h2>
+    </div>
+    <br><br>
+    <div class="row">
+        <div class="col-sm-12">
+            <div class="alert alert-warning text-justify">
+                <p>
+                    {{_('Please note: We need your API token from LUH data repository to be able to publish your dataset.
+                        If you already stored your API token, you can skip this by clicking the checkbox.
+                    ')}}
+                </p>
+            </div>
+        </div>
+    </div>
+    <br><br>
+    <section id="publish_step1">
+        <div class="row">
+            <div class="col-sm-12">
+                {{ macro.input('api_token', 
+                    id='transfer_api_token_input', 
+                    label=_('Your LUH API Token'),                          
+                    classes=['control-medium'] ,
+                    placeholder="My API token is ...")
+                }}
+                <label class="checkbox-container">{{_('Use my existing API token.')}}                     
+                    <input type="checkbox" 
+                    class="token-exist-box"
+                    name="token_exist_box"  
+                    id="token_exist_box"
+                    >
+                    <span class="checkmark"></span>
+                </label> 
+            </div>
+        </div>
+    </section>
+    <section id="publish_step2">
+        <div class="row" id="transfer_org_selection">
+            <div class="col-sm-12">
+                <label for="dataset_transfer_org_list">{{_("Target Organization")}}</label>
+                <input type="text" id="dataset_transfer_org_list">    
+            </div>
+        </div>
+    </section>
+    <div class="row" id="action_btn_part">
+        <br><hr>
+        <div class="col-sm-12">
+            <button id="dataset_transfer_cancel_btn" type="button" class="btn btn-danger pull-left">{{_('Cancel Publish')}}</button>
+            <button id="dataset_transfer_next_btn" class="btn btn-primary pull-right">{{_('Next')}}</button>
+        </div>
+    </div>
+    
+
+
+
+
 {% endblock %}

@@ -1,6 +1,12 @@
-#transfer_org_selection{
-    display: none;
+#publish_page_dataset_name_in_title{
+  text-decoration: underline;
 }
+
+#publish_step2{
+  display: none;
+}
+
+
 
 #final_action_buttons{
     display: none;

@@ -1,6 +1,7 @@
 # encoding: utf-8
 
 import json
+from os import abort
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
 from flask import request, render_template
@@ -17,6 +18,8 @@ class BaseController():
             Render the publish page.
         '''
         package = toolkit.get_action('package_show')({}, {'name_or_id': dataset_name})
+        if not Helper.check_access_edit_package(package['id']):
+                return toolkit.abort(403, "Not Authorized")
 
         return render_template('publish_page.html', pkg_dict=package)
 
