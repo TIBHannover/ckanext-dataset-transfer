@@ -19,6 +19,32 @@ $(document).ready(function(){
         }
     });
 
+    
+    /**
+     * Click on the publish button
+     */
+     $('#dataset_transfer_submit').click(function(){
+        $('#publish_step3').hide();
+        $('#publish_step_final').show();
+        let dest_url = $('#publish_url').val();
+        let formdata = new FormData();
+        formdata.set('package_id', $('#package_id').val());
+        formdata.set('api_token', $("#transfer_api_token_input").val());
+        let req = new XMLHttpRequest();
+        req.onreadystatechange = function() {
+        if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
+            // $('#dataset_transfer_org_list').select2({
+            //     data:JSON.parse(this.responseText),
+            //     width:'50%'
+            // });
+            // $('#publish_step1').hide();
+            // $('#publish_step2').show();
+            }
+        }
+        req.open("POST", dest_url);
+        req.send(formdata);
+    });
+
 });
 
 

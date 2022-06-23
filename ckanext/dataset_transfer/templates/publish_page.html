@@ -5,6 +5,7 @@
     {% asset 'ckanext-dataset-transfer/transfer-css' %}
     {% asset 'ckanext-dataset-transfer/transfer-js' %}
     <input type="hidden" id="org_list_call" value={{h.url_for('dataset_transfer.load_publish_form_data', _external=True)}}>  
+    <input type="hidden" id="publish_url" value={{h.url_for('dataset_transfer.publish', _external=True)}}>  
     <input type="hidden" id="package_id" value={{pkg_dict.id}}>
     <div class="row">
         <h2 class="modal-title">{{
@@ -76,6 +77,18 @@
         <div class="row">
             <div class="col-sm-12">
                 {% snippet "snippets/publish_dataset_metadata_table.html", dataset=pkg_dict %}  
+            </div>
+        </div>
+    </section>
+    <section id="publish_step_final">
+        <div class="row text-center">
+            <h3>Publishin in progress</h3>
+            <div class="col-sm-12">
+                <div class="jumping-dots-loader">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
             </div>
         </div>
     </section>
