@@ -7,9 +7,54 @@
   </thead>
   <tbody>
     <tr>
-      <th scope="row">1</th>
-      <td>Mark</td>
-      <td>Otto</td>
+      <th scope="row">dataset name</th>
+      <td>{{dataset['name']}}</td>
+    </tr>
+    <tr>
+      <th scope="row">Owner Organization (in SFB)</th>
+      <td>{{dataset['organization']['name']}}</td>
+    </tr>
+    <tr>
+      <th scope="row">License</th>
+      <td>{{dataset['license_title']}}</td>
+    </tr>
+    <tr>
+      <th scope="row">Version</th>
+      <td>{{dataset['version']}}</td>
+    </tr>
+    <tr>
+      <th scope="row">Number of data resource(s)</th>
+      <td>{{dataset['num_resources']}}</td>
+    </tr>
+    <tr>
+      <th scope="row">Tags</th>
+      <td>
+        {% for tag in dataset['tags'] %}
+            {{tag['display_name'] ~ ', '}}
+        {% endfor %}
+      </td>
+    </tr>
+    {% for ext in dataset['extras'] %}
+        <tr>
+            <th scope="row">{{ext['key']}}</th>
+            <td>{{ext['value']}}</td>
+        </tr>
+    {% endfor %}
+    <tr>
+      <th scope="row">Author</th>
+      <td>{{dataset['author']}}</td>
+    </tr>
+    <tr>
+      <th scope="row">Author E-mail</th>
+      <td>{{dataset['author_email']}}</td>
+    </tr>
+    <tr>
+      <th scope="row">Maintainer</th>
+      <td>{{dataset['maintainer']}}</td>
+    </tr>
+    <tr>
+      <th scope="row">Maintainer E-mail</th>
+      <td>{{dataset['maintainer_email']}}</td>
     </tr>
   </tbody>
 </table>
