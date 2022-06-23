@@ -43,7 +43,7 @@ class BaseController():
                 data = []
                 for org in response.json()["result"]:
                     temp = {}
-                    temp['value'] = response.json()["result"].index(org)
+                    temp['id'] = response.json()["result"].index(org)
                     temp['text'] = org
                     data.append(temp)
                 return json.dumps(data)

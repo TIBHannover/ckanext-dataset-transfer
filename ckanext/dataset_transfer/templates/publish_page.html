@@ -4,7 +4,8 @@
 {% block primary_content_inner %}
     {% asset 'ckanext-dataset-transfer/transfer-css' %}
     {% asset 'ckanext-dataset-transfer/transfer-js' %}
-
+    <input type="hidden" id="org_list_call" value={{h.url_for('dataset_transfer.load_publish_form_data', _external=True)}}>  
+    <input type="hidden" id="package_id" value={{pkg_dict.id}}>
     <div class="row">
         <h2 class="modal-title">{{
             _('Publish the dataset <span id="publish_page_dataset_name_in_title">' ~ pkg_dict.name ~ '</span> to LUH data repository')
@@ -56,7 +57,7 @@
         <br><hr>
         <div class="col-sm-12">
             <button id="dataset_transfer_cancel_btn" type="button" class="btn btn-danger pull-left">{{_('Cancel Publish')}}</button>
-            <button id="dataset_transfer_next_btn" class="btn btn-primary pull-right">{{_('Next')}}</button>
+            <button id="dataset_transfer_next_btn" class="btn btn-primary pull-right" step="2">{{_('Next')}}</button>
         </div>
     </div>
     
