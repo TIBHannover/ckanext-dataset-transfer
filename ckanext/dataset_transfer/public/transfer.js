@@ -1,5 +1,5 @@
 $(document).ready(function(){ 
-    
+
     /**
      * Click on the nect button
      */
