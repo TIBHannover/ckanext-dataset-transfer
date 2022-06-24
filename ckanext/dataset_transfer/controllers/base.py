@@ -43,15 +43,17 @@ class BaseController():
         resources_dir_path = toolkit.config['ckan.storage_path'] + '/resources/'
         headers = {'Authorization' : api_token.strip()}
         params = {'id': org_name}
-        # print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-        # print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-        # print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-        # print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-        # print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-        # print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-        # print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")       
+        print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
+        print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
+        print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
+        print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
+        print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
+        print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
+        print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")       
         org_answer = requests.get(BaseController.base_url + "organization_show", headers=headers, params=params).json()
-
+        
+        resources = dataset['resources']
+        dataset['resources'] = []
         dataset["groups"] = []
         dataset["isopen"] = True
         dataset["private"] = False
@@ -60,9 +62,36 @@ class BaseController():
         dataset['terms_of_usage'] = "Yes"
         dataset['have_copyright'] = "Yes"
         headers["Content-Type"] = "application/json"
-        answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset)
+        dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset)        
+        if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
+            return '500'
+        
+        just_uploaded_dataset = dataset_created_answer.json()['result']
+        for res in resources:
+            headers["Content-Type"] = "application/json"
+            if res['url_type'] == 'upload':
+                resource_data = res
+                file_content = {'upload': ''}
+                resource_data['package_id'] = just_uploaded_dataset['id']
+                file_path = resources_dir_path + res['id'][0:3] + '/' + res['id'][3:6] + '/' + res['id'][6:]
+                with open(file_path, 'rb') as file:
+                    file_content['upload'] = file.read()
 
-        return answer.content
+                created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
+                if created_resource.status_code == 200 and 'id' in created_resource.json()['result']:
+                    resource_patch_headers = {'Authorization' : api_token.strip()}
+                    res_data = {"id": created_resource.json()['result']['id']} 
+                    uploaded_file = requests.post(BaseController.base_url + "resource_patch", data=res_data, headers=resource_patch_headers, files=file_content)
+                    print(uploaded_file.json())
+                    
+            
+            else:
+                resource_data = res
+                resource_data['package_id'] = just_uploaded_dataset['id']
+                created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
+                
+            
+        return uploaded_file.content
 
 
 
