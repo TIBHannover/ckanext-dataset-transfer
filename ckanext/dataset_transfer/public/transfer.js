@@ -36,22 +36,15 @@ $(document).ready(function(){
         let req = new XMLHttpRequest();
         req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
-            if(this.responseText !== "500"){
-                $('#publish_step_final').hide(); 
-                $('#publish_result_section').show();
-                let data = JSON.parse(this.responseText);
-                $('#published_doi').text(data['doi']);
-                $('#published_url').find('a').attr("href", data['published_url']);
-                $('#published_url').find('a').text(data['published_url']);
-            }
+                if(this.responseText !== "500"){
+                    $('#publish_step_final').hide(); 
+                    $('#publish_result_section').show();
+                    let data = JSON.parse(this.responseText);
+                    $('#published_doi').text(data['doi']);
+                    $('#published_url').find('a').attr("href", data['published_url']);
+                    $('#published_url').find('a').text(data['published_url']);
+                }
             
-            
-            // $('#dataset_transfer_org_list').select2({
-            //     data:JSON.parse(this.responseText),
-            //     width:'50%'
-            // });
-            // $('#publish_step1').hide();
-            // $('#publish_step2').show();
             }
         }
         req.open("POST", dest_url);
