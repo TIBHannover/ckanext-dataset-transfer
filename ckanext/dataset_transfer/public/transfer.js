@@ -41,7 +41,8 @@ $(document).ready(function(){
                 $('#publish_result_section').show();
                 let data = JSON.parse(this.responseText);
                 $('#published_doi').text(data['doi']);
-                // $('#published_doi').text(data['doi']);
+                $('#published_url').find('a').attr("href", data['published_url']);
+                $('#published_url').find('a').text(data['published_url']);
             }
             
             

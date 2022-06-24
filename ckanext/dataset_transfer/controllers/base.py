@@ -12,6 +12,7 @@ import requests, json
 class BaseController():
 
     base_url = "https://data-neu.uni-hannover.de/api/3/action/"
+    publish_base_url = "https://data-neu.uni-hannover.de/"
 
 
     def publish_page(dataset_name):
@@ -90,7 +91,7 @@ class BaseController():
                 resource_data['package_id'] = just_uploaded_dataset['id']
                 created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
                 
-            
+        just_uploaded_dataset["published_url"] = BaseController.publish_base_url + "dataset/" + just_uploaded_dataset['name']
         return just_uploaded_dataset
 
 

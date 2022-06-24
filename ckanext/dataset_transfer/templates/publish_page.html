@@ -9,7 +9,7 @@
     <input type="hidden" id="package_id" value={{pkg_dict.id}}>
     <div class="row">
         <h2 class="modal-title">{{
-            _('Publish the dataset <span id="publish_page_dataset_name_in_title">' ~ pkg_dict.name ~ '</span> to LUH data repository')
+            _('Publish the dataset <span id="publish_page_dataset_name_in_title">' ~ pkg_dict.title ~ '</span> to LUH data repository')
             }}
         </h2>
     </div>
@@ -105,8 +105,8 @@
         <div class="row">
             <div class="col-sm-12">
                 <h4>{{_('Here is your DOI and public dataset URL on LUH:')}}</h4>
-                DOI: <div id="published_doi"></div>
-                URL: <div id="published_url"></div>
+                <div class="publish-result-field"></div> <b>DOI:</b>  <span id="published_doi"></span>
+                <div class="publish-result-field"></div> <b>URL:</b>  <span id="published_url"><a href="" target="_blank"></a></span>
             </div>
         </div>
 
