@@ -25,6 +25,10 @@ class BaseController():
         package = toolkit.get_action('package_show')({}, {'name_or_id': dataset_name})
         if not Helper.check_access_edit_package(package['id']):
                 return toolkit.abort(403, "Not Authorized")
+        
+        if(BaseController.is_dataset_published(package['id'])):
+                # dataset is already published
+                toolkit.abort(400, "This dataset is already published")
 
         return render_template('publish_page.html', pkg_dict=package)
 
@@ -38,6 +42,10 @@ class BaseController():
         
         try:
             package_id = request.form.get("package_id")
+            if(BaseController.is_dataset_published(package_id)):
+                # dataset is already published
+                toolkit.abort(400, "This dataset is already published")
+
             org_name = request.form.get("org")
             api_token = request.form.get("api_token")
             api_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJhUkZXRkZkUEtEYkVtUHREY2FYdDFpeWh2QzIyOVo3ZU0wRzZ2T0Z5dDB3IiwiaWF0IjoxNjU0ODY1NjAxfQ.JslZDQ7NrdLjhoj7EvQNGfMWh953yk-k7Snz78VwRpk"
