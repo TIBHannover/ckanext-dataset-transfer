@@ -3,7 +3,7 @@
 {% block content_action %}
 {{ super() }}
   {% set data_dict = {'id': pkg['id']} %}
-  {% if h.check_access('package_update', data_dict) %}
+  {% if h.check_access('package_update', data_dict) and not h.is_dataset_published(pkg['id']) %}
       {% set action = h.url_for('dataset_transfer.publish_page', dataset_name=pkg.name, _external=True)  %}
       <a href="{{action}}" type="button" class="btn btn-success">{{_('Publish to LUH')}}</a>
   {% endif %}

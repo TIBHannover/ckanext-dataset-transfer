@@ -1,4 +1,6 @@
 import imp
+
+from regex import B
 import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
 from flask import Blueprint
@@ -8,6 +10,7 @@ from ckanext.dataset_transfer.controllers.base import BaseController
 class DatasetTransferPlugin(plugins.SingletonPlugin):
     plugins.implements(plugins.IConfigurer)
     plugins.implements(plugins.IBlueprint)
+    plugins.implements(plugins.ITemplateHelpers)
 
     # IConfigurer
 
@@ -47,3 +50,7 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
             )
 
         return blueprint
+
+
+    def get_helpers(self):
+        return {'is_dataset_published': BaseController.is_dataset_published}

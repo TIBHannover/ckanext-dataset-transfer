@@ -136,3 +136,17 @@ class BaseController():
         
         except:
             return 'error'
+    
+
+
+    def is_dataset_published(id):
+        '''
+            Check if a dataset is already published ot not.
+        '''
+
+
+        db_object = PublishedDataset()
+        answer = db_object.get_by_dataset(id=id)
+        if not answer:
+            return False
+        return True
