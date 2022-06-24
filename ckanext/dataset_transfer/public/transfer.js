@@ -36,6 +36,15 @@ $(document).ready(function(){
         let req = new XMLHttpRequest();
         req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
+            if(this.responseText !== "500"){
+                $('#publish_step_final').hide(); 
+                $('#publish_result_section').show();
+                let data = JSON.parse(this.responseText);
+                $('#published_doi').text(data['doi']);
+                // $('#published_doi').text(data['doi']);
+            }
+            
+            
             // $('#dataset_transfer_org_list').select2({
             //     data:JSON.parse(this.responseText),
             //     width:'50%'

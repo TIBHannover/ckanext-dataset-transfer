@@ -82,7 +82,7 @@
     </section>
     <section id="publish_step_final">
         <div class="row text-center">
-            <h3>Publishing in progress</h3>
+            <h3>Publishing in progress (Can takes several minutes)</h3>
             <div class="col-sm-12">
                 <div class="jumping-dots-loader">
                     <span></span>
@@ -91,6 +91,25 @@
                 </div>
             </div>
         </div>
+    </section>
+    <section id="publish_result_section">
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="alert alert-success text-justify">
+                    <p>
+                        {{_('Your dataset has been successfully published to LUH data respository!')}}
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-sm-12">
+                <h4>{{_('Here is your DOI and public dataset URL on LUH:')}}</h4>
+                DOI: <div id="published_doi"></div>
+                URL: <div id="published_url"></div>
+            </div>
+        </div>
+
     </section>
     <div class="row" id="action_btn_part">
         <br><hr>
