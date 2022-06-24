@@ -7,6 +7,7 @@ from ckanext.dataset_transfer.libs.helper import Helper
 from flask import request, render_template
 import ckan.plugins.toolkit as toolkit
 import requests, json
+from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 
 
 class BaseController():
