@@ -9,6 +9,7 @@ import ckan.plugins.toolkit as toolkit
 import requests, json
 from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
+from datetime import datetime as _time
 
 
 class BaseController():
@@ -57,6 +58,7 @@ class BaseController():
             org_answer = requests.get(BaseController.base_url + "organization_show", headers=headers, params=params).json()
             
             resources = dataset['resources']
+            dataset_local_id = dataset['id']
             dataset['resources'] = []
             dataset["groups"] = []
             dataset["isopen"] = True
@@ -94,6 +96,14 @@ class BaseController():
                     created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
                     
             just_uploaded_dataset["published_url"] = BaseController.publish_base_url + "dataset/" + just_uploaded_dataset['name']
+            dataset_db_object = PublishedDataset(
+                dataset_id=dataset_local_id,
+                doi=just_uploaded_dataset['doi'],
+                published_url=just_uploaded_dataset['published_url'],
+                published_dataset_id=just_uploaded_dataset['id'],
+                publish_time=_time.now()
+            )
+            dataset_db_object.save()
             return just_uploaded_dataset
         
         except:
