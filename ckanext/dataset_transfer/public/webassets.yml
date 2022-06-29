@@ -21,16 +21,3 @@ info-css:
   output: ckanext-dataset-transfer/%(version)s_my.css
   contents:
     - info.css
-
-info-js:  
-  output: ckanext-dataset-transfer/%(version)s_my.js
-  extra:
-    preload:
-      - base/main
-      - vendor/vendor
-      - vendor/bootstrap
-      - vendor/jquery
-      - vendor/jquery.ui.core
-      - vendor/select2
-  contents:
-    - info.js
