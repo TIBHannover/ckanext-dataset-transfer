@@ -60,4 +60,6 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
 
 
     def get_helpers(self):
-        return {'is_dataset_published': BaseController.is_dataset_published}
+        return {'is_dataset_published': BaseController.is_dataset_published,
+                'get_published_doi_and_url': BaseController.get_published_doi_and_url
+        }

@@ -39,7 +39,7 @@ class PublishedDataset(domain_object.DomainObject):
             return False
         query = meta.Session.query(cls).filter(cls.dataset_id==id)
         query = query.autoflush(autoflush)
-        record = query
+        record = query.first()
         return record
 
 

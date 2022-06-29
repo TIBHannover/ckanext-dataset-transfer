@@ -209,3 +209,15 @@ class BaseController():
                 return str(True)
         
         return toolkit.abort(404, "")
+    
+
+
+
+    def get_published_doi_and_url(dataset_id):
+        '''
+            Get the doi and url for a published dataset.
+        '''
+
+        db_rec = PublishedDataset()
+        result = db_rec.get_by_dataset(id=dataset_id)
+        return [result.doi, result.published_url]

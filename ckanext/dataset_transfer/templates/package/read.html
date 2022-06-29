@@ -1,12 +1,16 @@
 {% ckan_extends %}
 
 
-{% block package_notes %}
+{% block package_notes %}    
     {% asset 'ckanext-dataset-transfer/info-css' %}
-    <div class="row publish-info-box">
-        <div class="col-sm-12">
-            
+     {% if h.is_dataset_published(pkg['id']) %}
+        <div class="row publish-info-box">
+            <div class="col-sm-12">
+                <h4>This dataset is Published:</h4>
+                <div class="publish-result-field"></div> <b>DOI:</b>  {{h.get_published_doi_and_url(pkg['id'])[0]}}
+                <div class="publish-result-field"></div> <b>URL:</b> <a href="{{h.get_published_doi_and_url(pkg['id'])[1]}}" target="_blank">{{h.get_published_doi_and_url(pkg['id'])[1]}}</a>
+            </div>
         </div>
-    </div>
+     {% endif %}
     {{ super() }}
 {% endblock %}
