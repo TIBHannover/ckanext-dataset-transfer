@@ -41,6 +41,8 @@ $(document).ready(function(){
         formdata.set('package_id', $('#package_id').val());
         formdata.set('org', org_name);
         formdata.set('api_token', $("#transfer_api_token_input").val());
+        formdata.set('save_api_token_box', $("#save_api_token_box").prop('checked'));
+        formdata.set('token_exist_box', $("#token_exist_box").prop('checked'));
         let req = new XMLHttpRequest();
         req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
