@@ -18,12 +18,17 @@ $(document).ready(function(){
             }
         }
         else if (step === "3"){
-            $('#publish_step1').hide();
-            $('#publish_step2').hide();
-            $('#publish_step3').show();
-            $(this).attr("step", "4");
-            $(this).hide();
-            $('#dataset_transfer_submit').show();
+            if($('#dataset_transfer_org_list').select2('data') === null){
+                $('#organization_empty_box_alert').show();
+            }
+            else{
+                $('#publish_step1').hide();
+                $('#publish_step2').hide();
+                $('#publish_step3').show();
+                $(this).attr("step", "4");
+                $(this).hide();
+                $('#dataset_transfer_submit').show();
+            }
         }
     });
 
@@ -88,6 +93,11 @@ $(document).ready(function(){
      $('#transfer_api_token_input').keydown(function(){
         $('#api_token_input_empty_alert_box').hide();
         $('#api_token_not_exist_alert_box').hide();
+     });
+
+
+     $('#dataset_transfer_org_list').click(function(){
+        $('#organization_empty_box_alert').hide();
      });
 
 });
