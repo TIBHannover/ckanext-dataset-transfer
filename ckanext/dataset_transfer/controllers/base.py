@@ -78,14 +78,7 @@ class BaseController():
 
             resources_dir_path = toolkit.config['ckan.storage_path'] + '/resources/'
             headers = {'Authorization' : api_token.strip()}
-            params = {'id': org_name}
-            print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-            print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-            print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-            print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-            print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-            print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")
-            print("()(9999999999999999999999999999999999999999999999999999999999999999999999999999999)")       
+            params = {'id': org_name}   
             org_answer = requests.get(BaseController.base_url + "organization_show", headers=headers, params=params).json()
             
             resources = dataset['resources']
@@ -101,8 +94,8 @@ class BaseController():
             headers["Content-Type"] = "application/json"
             dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset)        
             if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
-                # return dataset_created_answer
-                return '500'
+                return dataset_created_answer
+                # return '500'
             
             just_uploaded_dataset = dataset_created_answer.json()['result']
             for res in resources:
@@ -140,8 +133,8 @@ class BaseController():
             return just_uploaded_dataset
         
         except:
-            return '500'
-            # raise
+            # return '500'
+            raise
 
 
 

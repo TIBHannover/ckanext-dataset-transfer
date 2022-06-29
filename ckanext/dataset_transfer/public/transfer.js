@@ -100,7 +100,7 @@ function check_user_has_api_token(){
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
             if(req.responseText === "True"){                
                 GoToStep2();
-                $(this).attr("step", "3");
+                $('#dataset_transfer_next_btn').attr("step", "3");
             }
             else{
                 $('#api_token_not_exist_alert_box').show();

@@ -37,7 +37,7 @@ class PublishApiToken(domain_object.DomainObject):
             return False
         query = meta.Session.query(cls).filter(cls.user_id==id)
         query = query.autoflush(autoflush)
-        record = query
+        record = query.first()
         return record
 
 
