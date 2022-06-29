@@ -15,3 +15,9 @@ transfer-js:
       - vendor/select2
   contents:
     - transfer.js
+
+
+info-css:
+  output: ckanext-dataset-transfer/%(version)s_my.css
+  contents:
+    - info.css
