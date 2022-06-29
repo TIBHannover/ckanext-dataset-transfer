@@ -26,7 +26,16 @@
                 </div>
             </div>
         </div>
-        <br><br>
+        <br>
+        <div class="row" id="api_token_input_empty_alert_box">
+            <div class="col-sm-12">
+                <div class="alert alert-danger text-justify">
+                    <p>
+                        {{_('Please provide an API token!')}}
+                    </p>
+                </div>
+            </div>
+        </div>
         <div class="row">
             <div class="col-sm-12">
                 {{ macro.input('api_token', 

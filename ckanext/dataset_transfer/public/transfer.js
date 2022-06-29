@@ -6,8 +6,13 @@ $(document).ready(function(){
     $('#dataset_transfer_next_btn').click(function(){
         let step = $(this).attr("step");
         if( step === "2"){
-            GoToStep2();
-            $(this).attr("step", "3");
+            if($('#token_exist_box').prop('checked') === false && $('#transfer_api_token_input').val() === ""){
+                $('#api_token_input_empty_alert_box').show();
+            }
+            else{
+                GoToStep2();
+                $(this).attr("step", "3");
+            }
         }
         else if (step === "3"){
             $('#publish_step1').hide();
@@ -56,10 +61,12 @@ $(document).ready(function(){
      * Check the "use existing token checkbox"
      */
     $('#token_exist_box').click(function(){
+        $('#api_token_input_empty_alert_box').hide();
         if($(this).prop('checked') === true){
             $("#transfer_api_token_input").prop('disabled', true);
             $("#save_api_token_box").prop('disabled', true);
             $("#save_api_token_box").closest('label').css('color', "gray");
+            $("#save_api_token_box").prop('checked', false);
         }
         else{
             $("#transfer_api_token_input").prop('disabled', false);
@@ -67,6 +74,14 @@ $(document).ready(function(){
             $("#save_api_token_box").closest('label').css('color', "#333333");
         }
     });
+
+
+    /**
+     * Hide the alert when api token input changes
+     */
+     $('#transfer_api_token_input').keydown(function(){
+        $('#api_token_input_empty_alert_box').hide();
+     });
 
 });
 

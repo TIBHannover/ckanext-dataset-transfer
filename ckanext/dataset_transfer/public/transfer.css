@@ -19,6 +19,9 @@
     display: none;
 }
 
+#api_token_input_empty_alert_box{
+  display: none;
+}
 
 
 .checkbox-container {
