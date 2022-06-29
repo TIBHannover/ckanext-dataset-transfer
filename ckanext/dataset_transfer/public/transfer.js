@@ -9,6 +9,9 @@ $(document).ready(function(){
             if($('#token_exist_box').prop('checked') === false && $('#transfer_api_token_input').val() === ""){
                 $('#api_token_input_empty_alert_box').show();
             }
+            else if ($('#token_exist_box').prop('checked') === true){
+                check_user_has_api_token();
+            }
             else{
                 GoToStep2();
                 $(this).attr("step", "3");
@@ -62,6 +65,7 @@ $(document).ready(function(){
      */
     $('#token_exist_box').click(function(){
         $('#api_token_input_empty_alert_box').hide();
+        $('#api_token_not_exist_alert_box').hide();
         if($(this).prop('checked') === true){
             $("#transfer_api_token_input").prop('disabled', true);
             $("#save_api_token_box").prop('disabled', true);
@@ -81,9 +85,31 @@ $(document).ready(function(){
      */
      $('#transfer_api_token_input').keydown(function(){
         $('#api_token_input_empty_alert_box').hide();
+        $('#api_token_not_exist_alert_box').hide();
      });
 
 });
+
+
+function check_user_has_api_token(){
+    let dest_url = $('#check_api_token').val();
+    let req = new XMLHttpRequest();
+    req.onreadystatechange = function() {
+        if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
+            if(req.responseText === "True"){                
+                GoToStep2();
+                $(this).attr("step", "3");
+            }
+            else{
+                $('#api_token_not_exist_alert_box').show();
+            }            
+        }
+    }
+    req.open("GET", dest_url);
+    req.send();
+}
+
+
 
 
 function GoToStep2(){

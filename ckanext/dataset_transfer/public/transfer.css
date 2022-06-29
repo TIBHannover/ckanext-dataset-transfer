@@ -19,7 +19,7 @@
     display: none;
 }
 
-#api_token_input_empty_alert_box{
+#api_token_input_empty_alert_box, #api_token_not_exist_alert_box{
   display: none;
 }
 

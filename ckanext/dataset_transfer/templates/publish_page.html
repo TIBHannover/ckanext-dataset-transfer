@@ -6,6 +6,7 @@
     {% asset 'ckanext-dataset-transfer/transfer-js' %}
     <input type="hidden" id="org_list_call" value={{h.url_for('dataset_transfer.load_publish_form_data', _external=True)}}>  
     <input type="hidden" id="publish_url" value={{h.url_for('dataset_transfer.publish', _external=True)}}>  
+    <input type="hidden" id="check_api_token" value={{h.url_for('dataset_transfer.user_has_api_token', _external=True)}}>  
     <input type="hidden" id="package_id" value={{pkg_dict.id}}>
     <div class="row">
         <h2 class="modal-title">{{
@@ -32,6 +33,15 @@
                 <div class="alert alert-danger text-justify">
                     <p>
                         {{_('Please provide an API token!')}}
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="row" id="api_token_not_exist_alert_box">
+            <div class="col-sm-12">
+                <div class="alert alert-danger text-justify">
+                    <p>
+                        {{_('You do not have any API token! Please enter a new one.')}}
                     </p>
                 </div>
             </div>
