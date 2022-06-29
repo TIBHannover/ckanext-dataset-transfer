@@ -35,6 +35,18 @@
                     classes=['control-medium'] ,
                     placeholder="My API token is ...")
                 }}
+                <label class="checkbox-container">{{_('Store my API token for the future requests.')}}                     
+                    <input type="checkbox" 
+                    class="token-exist-box"
+                    name="save_api_token_box"  
+                    id="save_api_token_box"
+                    >
+                    <span class="checkmark"></span>
+                </label> 
+            </div>
+        </div><br><br>
+        <div class="row">
+            <div class="col-sm-12">
                 <label class="checkbox-container">{{_('Use my existing API token.')}}                     
                     <input type="checkbox" 
                     class="token-exist-box"
