@@ -51,6 +51,23 @@ $(document).ready(function(){
         req.send(formdata);
     });
 
+
+    /**
+     * Check the "use existing token checkbox"
+     */
+    $('#token_exist_box').click(function(){
+        if($(this).prop('checked') === true){
+            $("#transfer_api_token_input").prop('disabled', true);
+            $("#save_api_token_box").prop('disabled', true);
+            $("#save_api_token_box").closest('label').css('color', "gray");
+        }
+        else{
+            $("#transfer_api_token_input").prop('disabled', false);
+            $("#save_api_token_box").prop('disabled', false);
+            $("#save_api_token_box").closest('label').css('color', "#333333");
+        }
+    });
+
 });
 
 
