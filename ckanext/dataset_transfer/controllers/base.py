@@ -106,6 +106,14 @@ class BaseController():
                 return '500'
             
             just_uploaded_dataset = dataset_created_answer.json()['result']
+            # results = Helper.upload_data_resources(
+            #     resources=resources,
+            #     target_dataset_id=just_uploaded_dataset['id'],
+            #     base_url=BaseController.base_url,
+            #     headers=headers,
+            #     api_token=api_token
+            #     )
+            # print(results)
             for res in resources:
                 headers["Content-Type"] = "application/json"
                 if res['url_type'] == 'upload':
