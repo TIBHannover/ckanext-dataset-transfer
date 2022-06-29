@@ -145,7 +145,7 @@
     <div class="row" id="action_btn_part">
         <br><hr>
         <div class="col-sm-12">
-            <button id="dataset_transfer_cancel_btn" type="button" class="btn btn-danger pull-left">{{_('Cancel Publish')}}</button>
+            <a href="{{h.url_for('dataset.read', id=pkg_dict['name'],  _external=True)}}" id="dataset_transfer_cancel_btn" type="button" class="btn btn-danger pull-left">{{_('Cancel Publish')}}</a>
             <button id="dataset_transfer_next_btn" class="btn btn-primary pull-right" step="2">{{_('Next')}}</button>
             <button type="submit" id="dataset_transfer_submit" class="btn btn-success pull-right" step="2">{{_('Publish')}}</button>  
         </div>
