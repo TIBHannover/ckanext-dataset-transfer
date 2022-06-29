@@ -48,7 +48,7 @@ class BaseController():
 
             org_name = request.form.get("org")
             api_token = request.form.get("api_token")
-            api_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJhUkZXRkZkUEtEYkVtUHREY2FYdDFpeWh2QzIyOVo3ZU0wRzZ2T0Z5dDB3IiwiaWF0IjoxNjU0ODY1NjAxfQ.JslZDQ7NrdLjhoj7EvQNGfMWh953yk-k7Snz78VwRpk"
+            # api_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJhUkZXRkZkUEtEYkVtUHREY2FYdDFpeWh2QzIyOVo3ZU0wRzZ2T0Z5dDB3IiwiaWF0IjoxNjU0ODY1NjAxfQ.JslZDQ7NrdLjhoj7EvQNGfMWh953yk-k7Snz78VwRpk"
             dataset = toolkit.get_action('package_show')({}, {'name_or_id': package_id})
             if not Helper.check_access_edit_package(dataset['id']):
                     return toolkit.abort(403, "Not Authorized")
@@ -158,3 +158,16 @@ class BaseController():
         if not answer:
             return False
         return True
+    
+
+
+    def user_has_api_token():
+        if hasattr(toolkit.g, 'user'):
+            if toolkit.g.user:
+                user_id = toolkit.g.userobj.id
+                api_token_obj = PublishApiToken()
+                if not api_token_obj.get_by_user(user_id):
+                    return str(False)
+                return str(True)
+        
+        return toolkit.abort(404, "")

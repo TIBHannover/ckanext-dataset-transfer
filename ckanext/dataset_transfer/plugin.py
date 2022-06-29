@@ -48,6 +48,13 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
             BaseController.publish,
             methods=['POST']
             )
+        
+        blueprint.add_url_rule(
+            u'/dataset_transfer/user_has_api_token',
+            u'user_has_api_token',
+            BaseController.user_has_api_token,
+            methods=['GET']
+            )
 
         return blueprint
 
