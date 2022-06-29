@@ -67,14 +67,22 @@ class BaseController():
             else:
                 # get the api token from user
                 if save_api_token == "true":
+                    # delete the old one if exist
+                    if BaseController.user_has_api_token() == "True":
+                        user_id = toolkit.g.userobj.id
+                        api_token_obj = PublishApiToken()
+                        api_token_record = api_token_obj.get_by_user(id=user_id)
+                        api_token_record.delete()
+                        api_token_record.commit()
+
                     # save the api token
-                     api_token_obj = PublishApiToken(
+                    api_token_obj = PublishApiToken(
                         api_token=api_token,
                         user_id=toolkit.g.userobj.id,
                         target_ckan=BaseController.publish_base_url,
                         created_at=_time.now()
                      )
-                     api_token_obj.save()
+                    api_token_obj.save()
 
             resources_dir_path = toolkit.config['ckan.storage_path'] + '/resources/'
             headers = {'Authorization' : api_token.strip()}
@@ -94,8 +102,8 @@ class BaseController():
             headers["Content-Type"] = "application/json"
             dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset)        
             if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
-                return dataset_created_answer
-                # return '500'
+                # return dataset_created_answer
+                return '500'
             
             just_uploaded_dataset = dataset_created_answer.json()['result']
             for res in resources:
@@ -128,8 +136,7 @@ class BaseController():
                 published_dataset_id=just_uploaded_dataset['id'],
                 publish_time=_time.now()
             )
-            dataset_db_object.save()
-            # return json.dumps({'data': just_uploaded_dataset}), 200, {'ContentType':'application/json'} 
+            dataset_db_object.save()            
             return just_uploaded_dataset
         
         except:
