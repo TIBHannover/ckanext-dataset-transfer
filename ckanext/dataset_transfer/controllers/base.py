@@ -119,14 +119,14 @@ class BaseController():
             for res in resources:
                 headers["Content-Type"] = "application/json"
                 if res['url_type'] == 'upload':
-                    resource_data = res
-                    resource_data['id'] = ""
+                    resource_data = res                    
                     file_content = {'upload': '', 'name': res['name']}
                     resource_data['package_id'] = just_uploaded_dataset['id']
                     file_path = resources_dir_path + res['id'][0:3] + '/' + res['id'][3:6] + '/' + res['id'][6:]
                     with open(file_path, 'rb') as file:
                         file_content['upload'] = file.read()
 
+                    resource_data['id'] = ""
                     created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
                     if created_resource.status_code == 200 and 'id' in created_resource.json()['result']:
                         # upload the data file
