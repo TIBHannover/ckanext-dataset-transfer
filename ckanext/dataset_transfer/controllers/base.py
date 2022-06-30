@@ -120,7 +120,8 @@ class BaseController():
                 headers["Content-Type"] = "application/json"
                 if res['url_type'] == 'upload':
                     resource_data = res
-                    file_content = {'upload': '', 'url': res['url'], 'name': res['name']}
+                    resource_data['id'] = ""
+                    file_content = {'upload': '', 'name': res['name']}
                     resource_data['package_id'] = just_uploaded_dataset['id']
                     file_path = resources_dir_path + res['id'][0:3] + '/' + res['id'][3:6] + '/' + res['id'][6:]
                     with open(file_path, 'rb') as file:
@@ -147,8 +148,7 @@ class BaseController():
                 publish_time=_time.now()
             )
             dataset_db_object.save()            
-            # return just_uploaded_dataset
-            return uploaded_file.content
+            return just_uploaded_dataset
         
         except:
             return '500'
