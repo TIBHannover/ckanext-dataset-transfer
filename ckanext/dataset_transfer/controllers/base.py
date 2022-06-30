@@ -151,8 +151,8 @@ class BaseController():
             return just_uploaded_dataset
         
         except:
-            return '500'
-            # raise
+            # return '500'
+            raise
 
 
 
