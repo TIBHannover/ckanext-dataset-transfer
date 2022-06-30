@@ -101,8 +101,8 @@ class BaseController():
             headers["Content-Type"] = "application/json"
             dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset)        
             if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
-                if dataset_created_answer.json()['error']:
-                    return json.dumps({"error":dataset_created_answer.json()['error']['__type'], "message": dataset_created_answer.json()['error']['message']})
+                if dataset_created_answer.json().get('error'):
+                    return json.dumps({"error":dataset_created_answer.json()['error']['__type'], "message": dataset_created_answer.json()['error'].get('message')})
                 else:
                     return "500"
     
@@ -119,14 +119,16 @@ class BaseController():
             for res in resources:
                 headers["Content-Type"] = "application/json"
                 if res['url_type'] == 'upload':
-                    resource_data = res                    
+                    resource_data = res
+                    if resource_data.get('datastore_active'):
+                        del resource_data['datastore_active']                   
                     file_content = {'upload': ''}
                     resource_data['package_id'] = just_uploaded_dataset['id']
                     file_path = resources_dir_path + res['id'][0:3] + '/' + res['id'][3:6] + '/' + res['id'][6:]
                     with open(file_path, 'rb') as file:
                         file_content['upload'] = file.read()
 
-                    resource_data['id'] = ""
+                    # resource_data['id'] = ""
                     created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
                     if created_resource.status_code == 200 and 'id' in created_resource.json()['result']:
                         # upload the data file
