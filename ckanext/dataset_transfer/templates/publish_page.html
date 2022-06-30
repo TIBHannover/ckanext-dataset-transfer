@@ -173,6 +173,15 @@
                 <div class="publish-result-field"></div> <b>Message:</b>  <span id="published_fail_message"></span>
             </div>
         </div>
+        <br><br>
+        <div class="row">
+            <div class="col-sm-3">
+                <a href="{{h.url_for('dataset.read', id=pkg_dict['name'],  _external=True)}}"  type="button" class="btn btn-primary pull-left">{{_('Go back to the Dataset')}}</a>
+            </div>
+            <div class="col-sm-3">
+                <a href="{{h.url_for('dataset_transfer.publish_page', dataset_name=pkg_dict['name'],  _external=True)}}"  type="button" class="btn btn-success">{{_('Try again')}}</a>                
+            </div>
+        </div>
     </section>
     <div class="row" id="action_btn_part">
         <br><hr>
