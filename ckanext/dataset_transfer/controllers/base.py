@@ -1,7 +1,6 @@
 # encoding: utf-8
 
 import json
-from turtle import up
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
 from flask import request, render_template
