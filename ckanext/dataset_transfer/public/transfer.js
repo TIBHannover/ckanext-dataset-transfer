@@ -65,6 +65,7 @@ $(document).ready(function(){
                         $('#published_doi').text(data['doi']);
                         $('#published_url').find('a').attr("href", data['published_url']);
                         $('#published_url').find('a').text(data['published_url']);
+
                     }
                 }
                 else if (this.responseText === "500"){

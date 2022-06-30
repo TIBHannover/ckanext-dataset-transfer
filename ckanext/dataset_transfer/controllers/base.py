@@ -1,6 +1,7 @@
 # encoding: utf-8
 
 import json
+from turtle import up
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
 from flask import request, render_template
@@ -147,7 +148,8 @@ class BaseController():
                 publish_time=_time.now()
             )
             dataset_db_object.save()            
-            return just_uploaded_dataset
+            # return just_uploaded_dataset
+            return uploaded_file.content
         
         except:
             return '500'
