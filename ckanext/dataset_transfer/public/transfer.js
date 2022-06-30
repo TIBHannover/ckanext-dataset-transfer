@@ -52,12 +52,26 @@ $(document).ready(function(){
         req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
                 if(this.responseText !== "500"){
-                    $('#publish_step_final').hide(); 
-                    $('#publish_result_section').show();
                     let data = JSON.parse(this.responseText);
-                    $('#published_doi').text(data['doi']);
-                    $('#published_url').find('a').attr("href", data['published_url']);
-                    $('#published_url').find('a').text(data['published_url']);
+                    if(data.hasOwnProperty("error") && data.hasOwnProperty("message")){
+                        $('#publish_step_final').hide(); 
+                        $('#publish_failed_section').show();
+                        $('#published_fail_type').text(data['error']);
+                        $('#published_fail_message').text(data['message']);
+                    }
+                    else{
+                        $('#publish_step_final').hide(); 
+                        $('#publish_result_section').show();
+                        $('#published_doi').text(data['doi']);
+                        $('#published_url').find('a').attr("href", data['published_url']);
+                        $('#published_url').find('a').text(data['published_url']);
+                    }
+                }
+                else if (this.responseText === "500"){
+                    $('#publish_step_final').hide(); 
+                    $('#publish_failed_section').show();
+                    $('#published_fail_type').text("Unknown");
+                    $('#published_fail_message').text("None");
                 }
             
             }

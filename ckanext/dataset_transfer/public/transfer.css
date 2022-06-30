@@ -6,7 +6,7 @@
   text-decoration: underline;
 }
 
-#publish_step2, #publish_step3, #publish_step_final, #publish_result_section{
+#publish_step2, #publish_step3, #publish_step_final, #publish_result_section, #publish_failed_section{
   display: none;
 }
 

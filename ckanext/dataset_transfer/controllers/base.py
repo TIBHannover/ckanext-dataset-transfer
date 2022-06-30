@@ -1,7 +1,6 @@
 # encoding: utf-8
 
 import json
-from os import abort
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
 from flask import request, render_template
@@ -102,8 +101,11 @@ class BaseController():
             headers["Content-Type"] = "application/json"
             dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset)        
             if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
-                # return dataset_created_answer
-                return '500'
+                if dataset_created_answer.json()['error']:
+                    return json.dumps({"error":dataset_created_answer.json()['error']['__type'], "message": dataset_created_answer.json()['error']['message']})
+                else:
+                    return "500"
+    
             
             just_uploaded_dataset = dataset_created_answer.json()['result']
             # results = Helper.upload_data_resources(
@@ -148,8 +150,8 @@ class BaseController():
             return just_uploaded_dataset
         
         except:
-            # return '500'
-            raise
+            return '500'
+            # raise
 
 
 

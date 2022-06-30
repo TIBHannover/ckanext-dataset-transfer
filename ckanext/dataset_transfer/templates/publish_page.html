@@ -155,7 +155,24 @@
                 <a href="{{h.url_for('dataset.read', id=pkg_dict['name'],  _external=True)}}"  type="button" class="btn btn-primary pull-left">{{_('Go back to the Dataset')}}</a>
             </div>
         </div>
-
+    </section>
+    <section id="publish_failed_section">
+        <div class="row">
+            <div class="col-sm-12">
+                <div class="alert alert-danger text-justify">
+                    <p>
+                        {{_('Your publish failed! Please try again or contact your administration.')}}
+                    </p>
+                </div>
+            </div>
+        </div>
+         <div class="row">
+            <div class="col-sm-12">
+                <h4>{{_('The failure reason:')}}</h4>
+                <div class="publish-result-field"></div> <b>Failure Type:</b>  <span id="published_fail_type"></span>
+                <div class="publish-result-field"></div> <b>Message:</b>  <span id="published_fail_message"></span>
+            </div>
+        </div>
     </section>
     <div class="row" id="action_btn_part">
         <br><hr>
