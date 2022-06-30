@@ -21,9 +21,19 @@
                 <div class="alert alert-info text-justify">
                     <p>
                         {{_('Please note: We need your API token from LUH data repository to be able to publish your dataset.
-                            If you already stored your API token, you can skip this by clicking the checkbox.
+                            If you already stored your LUH API token, you can skip this by clicking the checkbox.
                         ')}}
                     </p>
+                </div>
+                <div class="alert alert-warning text-justify">
+                    <p>
+                        {{_('Please make sure your dataset has these fields. Without them you are not able to publish this dataset:')}}
+                    </p>
+                    <ul>
+                        <li>License</li>
+                        <li>Author name and email</li>
+                        <li>Maintainer name and email</li>
+                    </ul>
                 </div>
             </div>
         </div>
