@@ -1,6 +1,9 @@
 {% ckan_extends %}
 
 {% block heading_title %}
+    {% asset 'ckanext-dataset-transfer/info-css' %}
     {{ h.link_to(h.truncate(title, truncate_title), h.url_for('%s.read' % package.type, id=package.name)) }}
-    
+    {% if h.is_dataset_published(package.id) %}
+        <span class="published-list-tag"><i>published</i></span>
+    {% endif %}
 {% endblock %}

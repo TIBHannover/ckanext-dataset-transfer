@@ -5,3 +5,12 @@
     width: 50%;
     margin-bottom: 20px;    
 }
+
+.published-list-tag{
+    background-color: green;
+    color: white;
+    font-size: 11px;
+    padding: 5px;
+    border-radius: 30px;
+    margin-left: 10px;
+}
