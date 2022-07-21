@@ -24,4 +24,36 @@
             <input type="text" id="dataset_transfer_org_list">    
         </div>
     </div>
+    <br><hr>
+    <div class="row" id="consent_boxes">
+        <div class="alert alert-warning text-justify">
+            <p>
+                {{_('For publishing your dataset, you need to agree with the LUH terms of usage and rights of use.')}}
+            </p>
+        </div>
+        <div class="col-sm-12">
+              <label class="checkbox-container">
+                {{_('I am agree to the terms of usage. More details under ')}}
+                <a href="#" target="_blank">the legal information page</a>
+                <input type="checkbox" 
+                class="token-exist-box"
+                name="terms_of_usage"  
+                id="terms_of_usage"
+                >
+                <span class="checkmark"></span>
+            </label>
+        </div>
+        <div class="col-sm-12">
+              <label class="checkbox-container">
+                {{_('I am sure that the saved research data is free of third party rights. Example: personal data. Read more on the ')}}
+                <a href="#" target="_blank"> legal and licence information page.</a>
+                <input type="checkbox" 
+                class="token-exist-box"
+                name="rights_of_use"  
+                id="rights_of_use"
+                >
+                <span class="checkmark"></span>
+            </label> 
+        </div>
+    </div>
 </section>
