@@ -164,24 +164,25 @@ class BaseController():
             api_token = request.form.get('api_token')
             if not Helper.check_access_edit_package(package_id):
                 return 'Not Authorized'
-            
-            # api_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJhUkZXRkZkUEtEYkVtUHREY2FYdDFpeWh2QzIyOVo3ZU0wRzZ2T0Z5dDB3IiwiaWF0IjoxNjU0ODY1NjAxfQ.JslZDQ7NrdLjhoj7EvQNGfMWh953yk-k7Snz78VwRpk"
+                        
             header = {"Authorization" : api_token}
-            org_list_url = BaseController.base_url +  "organization_list"
+            org_list_url = BaseController.base_url +  "organization_list_for_user"
             response= requests.get(org_list_url, headers=header)
             if response.status_code != 200:
-                return '0'
+                return json.dumps([])
             else:
                 data = []
-                for org in response.json()["result"]:
+                count = 1
+                for org in response.json()["result"]:                    
                     temp = {}
-                    temp['id'] = response.json()["result"].index(org)
-                    temp['text'] = org
+                    temp['id'] = count
+                    temp['text'] = org['title']
                     data.append(temp)
+                    count += 1
                 return json.dumps(data)
         
         except:
-            return 'error'
+            return json.dumps([])
     
 
 
