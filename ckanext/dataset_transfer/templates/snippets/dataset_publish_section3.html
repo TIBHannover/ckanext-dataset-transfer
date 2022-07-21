@@ -1,0 +1,16 @@
+<section id="publish_step3">
+    <div class="row">
+        <div class="col-sm-12">
+            <div class="alert alert-info text-justify">
+                <p>
+                    {{_('Please check your dataset metadata before publishing.')}}
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-sm-12">
+            {% snippet "snippets/publish_dataset_metadata_table.html", dataset=pkg_dict %}  
+        </div>
+    </div>
+</section>

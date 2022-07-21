@@ -1,0 +1,27 @@
+<section id="publish_step2">
+    <div class="row">
+        <div class="col-sm-12">
+            <div class="alert alert-info text-justify">
+                <p>
+                    {{_('Please select the owner organization on LUH that will own your dataset.')}}
+                </p>
+            </div>
+        </div>
+    </div>
+    <br><br>
+    <div class="row" id="organization_empty_box_alert">
+        <div class="col-sm-12">
+            <div class="alert alert-danger text-justify">
+                <p>
+                    {{_('Please select an organization!')}}
+                </p>
+            </div>
+        </div>
+    </div><br>
+    <div class="row" id="transfer_org_selection">
+        <div class="col-sm-12">
+            <label for="dataset_transfer_org_list">{{_("Target Organization")}}</label>
+            <input type="text" id="dataset_transfer_org_list">    
+        </div>
+    </div>
+</section>

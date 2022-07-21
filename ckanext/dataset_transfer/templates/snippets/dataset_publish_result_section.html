@@ -1,0 +1,63 @@
+<section id="publish_step_final">
+    <div class="row text-center">
+        <h3>Publishing in progress (Can takes several minutes)</h3>
+        <div class="col-sm-12">
+            <div class="jumping-dots-loader">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </div>
+</section>
+<section id="publish_result_section">
+    <div class="row">
+        <div class="col-sm-12">
+            <div class="alert alert-success text-justify">
+                <p>
+                    {{_('Your dataset has been successfully published to LUH data respository!')}}
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-sm-12">
+            <h4>{{_('Here is your DOI and public dataset URL on LUH:')}}</h4>
+            <div class="publish-result-field"></div> <b>DOI:</b>  <span id="published_doi"></span>
+            <div class="publish-result-field"></div> <b>URL:</b>  <span id="published_url"><a href="" target="_blank"></a></span>
+        </div>
+    </div>
+    <br><br>
+    <div class="row">
+        <div class="col-sm-12">
+            <a href="{{h.url_for('dataset.read', id=pkg_dict['name'],  _external=True)}}"  type="button" class="btn btn-primary pull-left">{{_('Go back to the Dataset')}}</a>
+        </div>
+    </div>
+</section>
+<section id="publish_failed_section">
+    <div class="row">
+        <div class="col-sm-12">
+            <div class="alert alert-danger text-justify">
+                <p>
+                    {{_('Your publish failed! Please try again or contact your administration.')}}
+                </p>
+            </div>
+        </div>
+    </div>
+        <div class="row">
+        <div class="col-sm-12">
+            <h4>{{_('The failure reason:')}}</h4>
+            <div class="publish-result-field"></div> <b>Failure Type:</b>  <span id="published_fail_type"></span>
+            <div class="publish-result-field"></div> <b>Message:</b>  <span id="published_fail_message"></span>
+        </div>
+    </div>
+    <br><br>
+    <div class="row">
+        <div class="col-sm-3">
+            <a href="{{h.url_for('dataset.read', id=pkg_dict['name'],  _external=True)}}"  type="button" class="btn btn-primary pull-left">{{_('Go back to the Dataset')}}</a>
+        </div>
+        <div class="col-sm-3">
+            <a href="{{h.url_for('dataset_transfer.publish_page', dataset_name=pkg_dict['name'],  _external=True)}}"  type="button" class="btn btn-success">{{_('Try again')}}</a>                
+        </div>
+    </div>
+</section>

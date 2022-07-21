@@ -49,7 +49,6 @@ class BaseController():
             api_token = request.form.get("api_token")
             save_api_token = request.form.get("save_api_token_box")
             use_existing_api_token = request.form.get("token_exist_box")
-            # api_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJhUkZXRkZkUEtEYkVtUHREY2FYdDFpeWh2QzIyOVo3ZU0wRzZ2T0Z5dDB3IiwiaWF0IjoxNjU0ODY1NjAxfQ.JslZDQ7NrdLjhoj7EvQNGfMWh953yk-k7Snz78VwRpk"
             dataset = toolkit.get_action('package_show')({}, {'name_or_id': package_id})
             if not Helper.check_access_edit_package(dataset['id']):
                     return toolkit.abort(403, "Not Authorized")
