@@ -21,11 +21,13 @@
         </div>
     </div>
     <br>
-    <div class="row" id="api_token_input_empty_alert_box">
+    <div class="row" id="api_token_exist_info_box">
         <div class="col-sm-12">
-            <div class="alert alert-danger text-justify">
+            <div class="alert alert-success text-justify">
                 <p>
-                    {{_('Please provide an API token!')}}
+                    {{_('Note: You already have an API token. You can continue by clicking the second checkbox. 
+                        Alternatively, you can store a new token if you wish.
+                    ')}}
                 </p>
             </div>
         </div>
@@ -35,6 +37,16 @@
             <div class="alert alert-danger text-justify">
                 <p>
                     {{_('You do not have any API token! Please enter a new one.')}}
+                </p>
+            </div>
+        </div>
+    </div>
+    <br>
+    <div class="row" id="api_token_input_empty_alert_box">
+        <div class="col-sm-12">
+            <div class="alert alert-danger text-justify">
+                <p>
+                    {{_('Please provide an API token or use your existing token!')}}
                 </p>
             </div>
         </div>

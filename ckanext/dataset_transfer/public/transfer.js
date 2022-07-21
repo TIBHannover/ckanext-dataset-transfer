@@ -1,4 +1,6 @@
-$(document).ready(function(){ 
+$(document).ready(function(){
+    
+    check_user_has_api_token_and_show_message();
 
     /**
      * Click on the next button
@@ -130,6 +132,21 @@ function check_user_has_api_token(){
             else{
                 $('#api_token_not_exist_alert_box').show();
             }            
+        }
+    }
+    req.open("GET", dest_url);
+    req.send();
+}
+
+
+function check_user_has_api_token_and_show_message(){
+    let dest_url = $('#check_api_token').val();
+    let req = new XMLHttpRequest();
+    req.onreadystatechange = function() {
+        if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
+            if(req.responseText === "True"){                
+                $('#api_token_exist_info_box').show();
+            }         
         }
     }
     req.open("GET", dest_url);
