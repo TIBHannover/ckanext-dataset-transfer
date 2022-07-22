@@ -48,10 +48,15 @@ class BaseController():
             org_name = request.form.get("org")
             api_token = request.form.get("api_token")
             save_api_token = request.form.get("save_api_token_box")
+            terms_of_use_consent = request.form.get("terms_of_usage")
+            rights_of_use_consent = request.form.get("rights_of_use")
             use_existing_api_token = request.form.get("token_exist_box")
             dataset = toolkit.get_action('package_show')({}, {'name_or_id': package_id})
             if not Helper.check_access_edit_package(dataset['id']):
                     return toolkit.abort(403, "Not Authorized")
+            
+            if terms_of_use_consent != "true" or rights_of_use_consent != "true":
+                return '500'
             
             if use_existing_api_token == "true":
                 # use the user existing api token
@@ -107,14 +112,6 @@ class BaseController():
     
             
             just_uploaded_dataset = dataset_created_answer.json()['result']
-            # results = Helper.upload_data_resources(
-            #     resources=resources,
-            #     target_dataset_id=just_uploaded_dataset['id'],
-            #     base_url=BaseController.base_url,
-            #     headers=headers,
-            #     api_token=api_token
-            #     )
-            # print(results)
             for res in resources:
                 headers["Content-Type"] = "application/json"
                 if res['url_type'] == 'upload':
@@ -126,8 +123,7 @@ class BaseController():
                     file_path = resources_dir_path + res['id'][0:3] + '/' + res['id'][3:6] + '/' + res['id'][6:]
                     with open(file_path, 'rb') as file:
                         file_content['upload'] = file.read()
-
-                    # resource_data['id'] = ""
+                    
                     created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
                     if created_resource.status_code == 200 and 'id' in created_resource.json()['result']:
                         # upload the data file
@@ -152,8 +148,8 @@ class BaseController():
             return just_uploaded_dataset
         
         except:
-            # return '500'
-            raise
+            return '500'
+            # raise
 
 
 
