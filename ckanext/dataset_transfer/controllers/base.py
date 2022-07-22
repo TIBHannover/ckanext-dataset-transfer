@@ -57,13 +57,14 @@ class BaseController():
             
             if terms_of_use_consent != "true" or rights_of_use_consent != "true":
                 return '500'
-            
+                       
             if use_existing_api_token == "true":
                 # use the user existing api token
                 if BaseController.user_has_api_token() == "True":
                     user_id = toolkit.g.userobj.id
                     api_token_obj = PublishApiToken()
-                    api_token = api_token_obj.get_by_user(id=user_id).api_token
+                    api_token = api_token_obj.get_by_user(id=user_id).api_token                   
+                   
                 else:
                     return toolkit.abort(403, "Invalid request")
             
@@ -103,7 +104,6 @@ class BaseController():
             dataset['have_copyright'] = "Yes"
             headers["Content-Type"] = "application/json"
             dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset) 
-            print(dataset_created_answer)       
             if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
                 if dataset_created_answer.json().get('error'):
                     return json.dumps({"error":dataset_created_answer.json()['error']['__type'], "message": dataset_created_answer.json()['error'].get('message')})
@@ -158,9 +158,17 @@ class BaseController():
         try:
             package_id = request.form.get('package_id')
             api_token = request.form.get('api_token')
+            use_existing_token = request.form.get('token_exist_box')
             if not Helper.check_access_edit_package(package_id):
                 return 'Not Authorized'
-                        
+            
+            if use_existing_token == "true":
+                # use the user existing api token
+                if BaseController.user_has_api_token() == "True":
+                    user_id = toolkit.g.userobj.id
+                    api_token_obj = PublishApiToken()
+                    api_token = api_token_obj.get_by_user(id=user_id).api_token   
+
             header = {"Authorization" : api_token}
             org_list_url = BaseController.base_url +  "organization_list_for_user"
             response= requests.get(org_list_url, headers=header)

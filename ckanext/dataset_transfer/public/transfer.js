@@ -170,6 +170,7 @@ function GoToStep2(){
     let formdata = new FormData();
     formdata.set('package_id', $('#package_id').val());
     formdata.set('api_token', $("#transfer_api_token_input").val());
+    formdata.set('token_exist_box', $("#token_exist_box").prop('checked'));
     let req = new XMLHttpRequest();
     req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {
