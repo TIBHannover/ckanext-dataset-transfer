@@ -41,18 +41,20 @@ $(document).ready(function(){
     /**
      * Click on the publish button
      */
-     $('#dataset_transfer_submit').click(function(){
+     $('#dataset_transfer_submit').click(function(){        
         $('#publish_step3').hide();
         $('#action_btn_part').hide();
         $('#publish_step_final').show();
         let dest_url = $('#publish_url').val();
-        let org_name = $('#dataset_transfer_org_list').select2('data').text;
+        let org_name = $('#dataset_transfer_org_list').select2('data').id;
         let formdata = new FormData();
         formdata.set('package_id', $('#package_id').val());
         formdata.set('org', org_name);
         formdata.set('api_token', $("#transfer_api_token_input").val());
         formdata.set('save_api_token_box', $("#save_api_token_box").prop('checked'));
         formdata.set('token_exist_box', $("#token_exist_box").prop('checked'));
+        formdata.set('terms_of_usage', $("#terms_of_usage").prop('checked'));
+        formdata.set('rights_of_use', $("#rights_of_use").prop('checked'));
         let req = new XMLHttpRequest();
         req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
@@ -171,7 +173,7 @@ function GoToStep2(){
     let req = new XMLHttpRequest();
     req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {
-            let orgList = JSON.parse(this.responseText);
+            let orgList = JSON.parse(this.responseText);            
             if(orgList.length === 0){
                 $('.org_should_exist').hide();
                 $('#no_org_message').show();

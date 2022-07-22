@@ -91,7 +91,6 @@ class BaseController():
             headers = {'Authorization' : api_token.strip()}
             params = {'id': org_name}   
             org_answer = requests.get(BaseController.base_url + "organization_show", headers=headers, params=params).json()
-            
             resources = dataset['resources']
             dataset_local_id = dataset['id']
             dataset['resources'] = []
@@ -103,7 +102,8 @@ class BaseController():
             dataset['terms_of_usage'] = "Yes"
             dataset['have_copyright'] = "Yes"
             headers["Content-Type"] = "application/json"
-            dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset)        
+            dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset) 
+            print(dataset_created_answer)       
             if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
                 if dataset_created_answer.json().get('error'):
                     return json.dumps({"error":dataset_created_answer.json()['error']['__type'], "message": dataset_created_answer.json()['error'].get('message')})
@@ -171,7 +171,7 @@ class BaseController():
                 count = 1
                 for org in response.json()["result"]:                    
                     temp = {}
-                    temp['id'] = count
+                    temp['id'] = org['name']
                     temp['text'] = org['title']
                     data.append(temp)
                     count += 1
