@@ -1,5 +1,5 @@
 <section id="publish_step2">
-    <div class="row">
+    <div class="row org_should_exist">
         <div class="col-sm-12">
             <div class="alert alert-info text-justify">
                 <p>
@@ -9,7 +9,19 @@
         </div>
     </div>
     <br><br>
-    <div class="row" id="organization_empty_box_alert">
+    <div class="row" id="no_org_message">
+        <div class="col-sm-12">
+            <div class="alert alert-danger text-justify">
+                <p>
+                    {{_('There is no organization linked to your API token. <br>
+                        Please make sure your API token is correct and you are a member of the 
+                        target organization.
+                    ')}}
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="row org_should_exist" id="organization_empty_box_alert">
         <div class="col-sm-12">
             <div class="alert alert-danger text-justify">
                 <p>
@@ -18,14 +30,14 @@
             </div>
         </div>
     </div><br>
-    <div class="row" id="transfer_org_selection">
+    <div class="row org_should_exist" id="transfer_org_selection">
         <div class="col-sm-12">
             <label for="dataset_transfer_org_list">{{_("Target Organization")}}</label>
             <input type="text" id="dataset_transfer_org_list">    
         </div>
     </div>
     <br><hr>
-    <div class="row" id="consent_boxes">
+    <div class="row org_should_exist" id="consent_boxes">
         <div class="alert alert-warning text-justify">
             <p>
                 {{_('For publishing your dataset, you need to agree with the LUH terms of usage and rights of use.')}}

@@ -19,7 +19,11 @@
     display: none;
 }
 
-#api_token_input_empty_alert_box, #api_token_not_exist_alert_box, #organization_empty_box_alert, #api_token_exist_info_box{
+#api_token_input_empty_alert_box,
+#api_token_not_exist_alert_box, 
+#organization_empty_box_alert, 
+#api_token_exist_info_box, 
+#no_org_message{
   display: none;
 }
 

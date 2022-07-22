@@ -163,11 +163,20 @@ function GoToStep2(){
     formdata.set('api_token', $("#transfer_api_token_input").val());
     let req = new XMLHttpRequest();
     req.onreadystatechange = function() {
-        if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
-            $('#dataset_transfer_org_list').select2({
-                data:JSON.parse(this.responseText),
-                width:'50%'
-            });
+        if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {
+            let orgList = JSON.parse(this.responseText);
+            if(orgList.length === 0){
+                $('.org_should_exist').hide();
+                $('#no_org_message').show();
+            }
+            else{
+                $('#no_org_message').hide();
+                $('.org_should_exist').show();
+                $('#dataset_transfer_org_list').select2({
+                    data:orgList,
+                    width:'50%'
+                });                
+            }
             $('#publish_step1').hide();
             $('#publish_step2').show();
         }
