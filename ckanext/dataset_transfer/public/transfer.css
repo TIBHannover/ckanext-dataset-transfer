@@ -23,7 +23,8 @@
 #api_token_not_exist_alert_box, 
 #organization_empty_box_alert, 
 #api_token_exist_info_box, 
-#no_org_message{
+#no_org_message, 
+#no_consent_alert_message{
   display: none;
 }
 

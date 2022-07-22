@@ -23,6 +23,9 @@ $(document).ready(function(){
             if($('#dataset_transfer_org_list').select2('data') === null){
                 $('#organization_empty_box_alert').show();
             }
+            else if($('#terms_of_usage').prop('checked') !== true || $('#rights_of_use').prop('checked') !== true){
+                $("#no_consent_alert_message").show();
+            }
             else{
                 $('#publish_step1').hide();
                 $('#publish_step2').hide();
@@ -117,6 +120,10 @@ $(document).ready(function(){
         $('#organization_empty_box_alert').hide();
      });
 
+     $('.consent-box').click(function(){
+        $('#no_consent_alert_message').hide();
+     });
+
 });
 
 
@@ -170,8 +177,7 @@ function GoToStep2(){
                 $('#no_org_message').show();
             }
             else{
-                $('#no_org_message').hide();
-                $('.org_should_exist').show();
+                $('#no_org_message').hide();                
                 $('#dataset_transfer_org_list').select2({
                     data:orgList,
                     width:'50%'

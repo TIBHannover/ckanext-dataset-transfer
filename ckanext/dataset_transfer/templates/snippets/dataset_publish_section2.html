@@ -43,12 +43,22 @@
                 {{_('For publishing your dataset, you need to agree with the LUH terms of usage and rights of use.')}}
             </p>
         </div>
+        <div class="row" id="no_consent_alert_message">
+            <div class="col-sm-12">
+                <div class="alert alert-danger text-justify">
+                    <p>
+                        {{_(' You need to declare your consent to LUH terms of usage and rights of use to publish your dataset.
+                        ')}}
+                    </p>
+                </div>
+            </div>
+        </div>
         <div class="col-sm-12">
               <label class="checkbox-container">
                 {{_('I am agree to the terms of usage. More details under ')}}
                 <a href="#" target="_blank">the legal information page</a>
                 <input type="checkbox" 
-                class="token-exist-box"
+                class="token-exist-box consent-box"
                 name="terms_of_usage"  
                 id="terms_of_usage"
                 >
@@ -60,7 +70,7 @@
                 {{_('I am sure that the saved research data is free of third party rights. Example: personal data. Read more on the ')}}
                 <a href="#" target="_blank"> legal and licence information page.</a>
                 <input type="checkbox" 
-                class="token-exist-box"
+                class="token-exist-box consent-box"
                 name="rights_of_use"  
                 id="rights_of_use"
                 >
