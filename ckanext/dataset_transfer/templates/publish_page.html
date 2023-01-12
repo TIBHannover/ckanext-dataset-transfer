@@ -3,8 +3,7 @@
 
 {% block primary_content_inner %}
     {% asset 'ckanext-dataset-transfer/transfer-css' %}
-    {% asset 'ckanext-dataset-transfer/transfer-js' %}
-    <input type="hidden" id="org_list_call" value={{h.url_for('dataset_transfer.load_publish_form_data', _external=True)}}>  
+    {% asset 'ckanext-dataset-transfer/transfer-js' %}    
     <input type="hidden" id="publish_url" value={{h.url_for('dataset_transfer.publish', _external=True)}}>  
     <input type="hidden" id="check_api_token" value={{h.url_for('dataset_transfer.user_has_api_token', _external=True)}}>  
     <input type="hidden" id="package_id" value={{pkg_dict.id}}>

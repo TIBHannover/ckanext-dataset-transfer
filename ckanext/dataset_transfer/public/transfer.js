@@ -15,15 +15,14 @@ $(document).ready(function(){
                 check_user_has_api_token();
             }
             else{
-                GoToStep2();
+                // GoToStep2();
+                $('#publish_step1').hide();
+                $('#publish_step2').show();
                 $(this).attr("step", "3");
             }
         }
-        else if (step === "3"){
-            if($('#dataset_transfer_org_list').select2('data') === null){
-                $('#organization_empty_box_alert').show();
-            }
-            else if($('#terms_of_usage').prop('checked') !== true || $('#rights_of_use').prop('checked') !== true){
+        else if (step === "3"){          
+            if($('#terms_of_usage').prop('checked') !== true || $('#rights_of_use').prop('checked') !== true){
                 $("#no_consent_alert_message").show();
             }
             else{
@@ -45,11 +44,9 @@ $(document).ready(function(){
         $('#publish_step3').hide();
         $('#action_btn_part').hide();
         $('#publish_step_final').show();
-        let dest_url = $('#publish_url').val();
-        let org_name = $('#dataset_transfer_org_list').select2('data').id;
+        let dest_url = $('#publish_url').val();        
         let formdata = new FormData();
-        formdata.set('package_id', $('#package_id').val());
-        formdata.set('org', org_name);
+        formdata.set('package_id', $('#package_id').val());        
         formdata.set('api_token', $("#transfer_api_token_input").val());
         formdata.set('save_api_token_box', $("#save_api_token_box").prop('checked'));
         formdata.set('token_exist_box', $("#token_exist_box").prop('checked'));
@@ -135,7 +132,9 @@ function check_user_has_api_token(){
     req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
             if(req.responseText === "True"){                
-                GoToStep2();
+                // GoToStep2();
+                $('#publish_step1').hide();
+                $('#publish_step2').show();
                 $('#dataset_transfer_next_btn').attr("step", "3");
             }
             else{

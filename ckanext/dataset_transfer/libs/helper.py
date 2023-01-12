@@ -97,7 +97,16 @@ class Helper():
         
         return all_results
 
-                    
+
+
+    def get_organization_id():
+        ckan_root_path = toolkit.config.get('ckan.root_path')
+        if  ckan_root_path and 'sfb1368/ckan' in ckan_root_path:
+            return "sfb_1368"
+        elif ckan_root_path and 'sfb1153/ckan' in ckan_root_path:
+            return "sfb_1153"
+        else:
+            return "" 
                     
 
 

@@ -45,7 +45,7 @@ class BaseController():
                 # dataset is already published
                 toolkit.abort(400, "This dataset is already published")
 
-            org_name = request.form.get("org")
+            org_name = Helper.get_organization_id()
             api_token = request.form.get("api_token")
             save_api_token = request.form.get("save_api_token_box")
             terms_of_use_consent = request.form.get("terms_of_usage")
