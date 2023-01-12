@@ -1,14 +1,4 @@
-<section id="publish_step2">
-    <div class="row org_should_exist">
-        <div class="col-sm-12">
-            <div class="alert alert-info text-justify">
-                <p>
-                    {{_('Please select the owner organization on LUH that will own your dataset.')}}
-                </p>
-            </div>
-        </div>
-    </div>
-    <br><br>
+<section id="publish_step2">    
     <div class="row" id="no_org_message">
         <div class="col-sm-12">
             <div class="alert alert-danger text-justify">
@@ -21,19 +11,11 @@
             </div>
         </div>
     </div>
-    <div class="row org_should_exist" id="organization_empty_box_alert">
+    <div class="row">
         <div class="col-sm-12">
-            <div class="alert alert-danger text-justify">
-                <p>
-                    {{_('Please select an organization!')}}
-                </p>
-            </div>
-        </div>
-    </div><br>
-    <div class="row org_should_exist" id="transfer_org_selection">
-        <div class="col-sm-12">
-            <label for="dataset_transfer_org_list">{{_("Target Organization")}}</label>
-            <input type="text" id="dataset_transfer_org_list">    
+            <h4>
+                {{_('Your dataset will get published in this organization: ')}} <strong>{{h.get_org_name()}}</strong>
+            </h4>
         </div>
     </div>
     <br><hr>

@@ -230,3 +230,13 @@ class BaseController():
         db_rec = PublishedDataset()
         result = db_rec.get_by_dataset(id=dataset_id)
         return [result.doi, result.published_url]
+
+
+    def which_sfb():
+        ckan_root_path = toolkit.config.get('ckan.root_path')
+        if  ckan_root_path and 'sfb1368/ckan' in ckan_root_path:
+            return "SFB 1368"
+        elif ckan_root_path and 'sfb1153/ckan' in ckan_root_path:
+            return "SFB 1153"
+        else:
+            return "SFB 1153"
