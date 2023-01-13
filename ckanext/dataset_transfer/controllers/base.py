@@ -13,8 +13,10 @@ from datetime import datetime as _time
 
 class BaseController():
 
-    base_url = "https://data-neu.uni-hannover.de/api/3/action/"
-    publish_base_url = "https://data-neu.uni-hannover.de/"
+    # base_url = "https://data-neu.uni-hannover.de/api/3/action/"
+    # publish_base_url = "https://data-neu.uni-hannover.de/"
+    base_url = "https://data.uni-hannover.de/api/3/action/" 
+    publish_base_url = "https://data.uni-hannover.de/"   
 
 
     def publish_page(dataset_name):
