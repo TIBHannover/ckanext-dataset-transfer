@@ -8,7 +8,8 @@ $(document).ready(function(){
     $('#dataset_transfer_next_btn').click(function(){
         let step = $(this).attr("step");
         if( step === "2"){
-            if($('#token_exist_box').prop('checked') === false && $('#transfer_api_token_input').val() === ""){
+            console.info($('#token_exist_box').is(':checked'))
+            if($('#token_exist_box').prop('checked') === false && $('#transfer_api_token_input').val() === ""){                
                 $('#api_token_input_empty_alert_box').show();
             }
             else if ($('#token_exist_box').prop('checked') === true){
@@ -130,14 +131,14 @@ function check_user_has_api_token(){
     let dest_url = $('#check_api_token').val();
     let req = new XMLHttpRequest();
     req.onreadystatechange = function() {
-        if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {       
+        if (req.readyState == XMLHttpRequest.DONE && req.status === 200){            
             if(req.responseText === "True"){                
                 // GoToStep2();
                 $('#publish_step1').hide();
                 $('#publish_step2').show();
                 $('#dataset_transfer_next_btn').attr("step", "3");
             }
-            else{
+            else{                
                 $('#api_token_not_exist_alert_box').show();
             }            
         }
