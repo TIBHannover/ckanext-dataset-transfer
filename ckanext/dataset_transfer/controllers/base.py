@@ -134,9 +134,9 @@ class BaseController():
                         uploaded_file = requests.post(BaseController.base_url + "resource_patch", data=res_data, headers=resource_patch_headers, files=file_content)                    
                 
                 else:
-                    if resource_data.get('datastore_active'):
-                        del resource_data['datastore_active']
                     resource_data = res
+                    if resource_data.get('datastore_active'):
+                        del resource_data['datastore_active']                    
                     resource_data['package_id'] = just_uploaded_dataset['id']
                     created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
                     
