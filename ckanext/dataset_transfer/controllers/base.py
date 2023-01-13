@@ -115,12 +115,11 @@ class BaseController():
             
             just_uploaded_dataset = dataset_created_answer.json()['result']
             for res in resources:
-                headers["Content-Type"] = "application/json"
-                res['datastore_active'] = True
+                headers["Content-Type"] = "application/json"                
                 if res['url_type'] == 'upload':
                     resource_data = res
-                    # if resource_data.get('datastore_active'):
-                    #     del resource_data['datastore_active']
+                    if resource_data.get('datastore_active'):
+                        del resource_data['datastore_active']
                     file_content = {'upload': ''}
                     resource_data['package_id'] = just_uploaded_dataset['id']
                     file_path = resources_dir_path + res['id'][0:3] + '/' + res['id'][3:6] + '/' + res['id'][6:]
@@ -135,6 +134,8 @@ class BaseController():
                         uploaded_file = requests.post(BaseController.base_url + "resource_patch", data=res_data, headers=resource_patch_headers, files=file_content)                    
                 
                 else:
+                    if resource_data.get('datastore_active'):
+                        del resource_data['datastore_active']
                     resource_data = res
                     resource_data['package_id'] = just_uploaded_dataset['id']
                     created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
