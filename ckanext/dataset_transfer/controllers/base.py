@@ -16,7 +16,7 @@ class BaseController():
     # base_url = "https://data-neu.uni-hannover.de/api/3/action/"
     # publish_base_url = "https://data-neu.uni-hannover.de/"
     base_url = "https://data.uni-hannover.de/api/3/action/" 
-    publish_base_url = "https://data.uni-hannover.de/"   
+    publish_base_url = "https://data.uni-hannover.de/"
 
 
     def publish_page(dataset_name):
@@ -118,8 +118,8 @@ class BaseController():
                 headers["Content-Type"] = "application/json"
                 if res['url_type'] == 'upload':
                     resource_data = res
-                    if resource_data.get('datastore_active'):
-                        del resource_data['datastore_active']                   
+                    # if resource_data.get('datastore_active'):
+                    #     del resource_data['datastore_active']                   
                     file_content = {'upload': ''}
                     resource_data['package_id'] = just_uploaded_dataset['id']
                     file_path = resources_dir_path + res['id'][0:3] + '/' + res['id'][3:6] + '/' + res['id'][6:]
