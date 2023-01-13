@@ -106,7 +106,7 @@ class Helper():
         elif ckan_root_path and 'sfb1153/ckan' in ckan_root_path:
             return "sfb_1153"
         else:
-            return "tib" 
+            return "" 
                     
 
 
