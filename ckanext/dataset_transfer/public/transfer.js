@@ -8,7 +8,7 @@ $(document).ready(function(){
     $('#dataset_transfer_next_btn').click(function(){
         let step = $(this).attr("step");
         if( step === "2"){
-            console.info($('#token_exist_box').is(':checked'))
+            // console.info($('#token_exist_box').is(':checked'))
             if($('#token_exist_box').prop('checked') === false && $('#transfer_api_token_input').val() === ""){                
                 $('#api_token_input_empty_alert_box').show();
             }
