@@ -46,7 +46,7 @@ meta.mapper(
     PublishApiToken,
     publish_api_token_table,
     properties={
-        u"user": orm.relation(
+        u"user": orm.relationship(
             User, backref=orm.backref(u"publish_api_token", cascade=u"all, delete, delete-orphan")
         )
     },

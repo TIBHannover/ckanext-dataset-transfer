@@ -1,11 +1,11 @@
 # encoding: utf-8
 
+import copy
 import json
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
 from flask import request, render_template
 import ckan.plugins.toolkit as toolkit
-import requests, json
 from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
 from datetime import datetime as _time
@@ -31,7 +31,7 @@ class BaseController():
                 # dataset is already published
                 toolkit.abort(400, "This dataset is already published")
 
-        return render_template('publish_page.html', pkg_dict=package)
+        return render_template('publish_page.html', pkg=package, pkg_dict=package)
 
 
 
@@ -95,18 +95,19 @@ class BaseController():
             params = {'id': org_name}   
             org_answer = requests.get(BaseController.base_url + "organization_show", headers=headers, params=params).json()
             # print(org_answer)
-            resources = dataset['resources']
+            resources = copy.deepcopy(dataset.get('resources', []))
             dataset_local_id = dataset['id']
-            dataset['resources'] = []
-            dataset["groups"] = []
-            dataset["isopen"] = True
-            dataset["private"] = False
-            dataset["owner_org"] = org_answer['result']['id']
-            dataset['id'] = ""
-            dataset['terms_of_usage'] = "Yes"
-            dataset['have_copyright'] = "Yes"
+            dataset_to_publish = copy.deepcopy(dataset)
+            dataset_to_publish['resources'] = []
+            dataset_to_publish["groups"] = []
+            dataset_to_publish["isopen"] = True
+            dataset_to_publish["private"] = False
+            dataset_to_publish["owner_org"] = org_answer['result']['id']
+            dataset_to_publish['id'] = ""
+            dataset_to_publish['terms_of_usage'] = "Yes"
+            dataset_to_publish['have_copyright'] = "Yes"
             headers["Content-Type"] = "application/json"
-            dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset) 
+            dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset_to_publish)
             if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
                 if dataset_created_answer.json().get('error'):
                     return json.dumps({"error":dataset_created_answer.json()['error']['__type'], "message": dataset_created_answer.json()['error'].get('message')})
@@ -119,7 +120,7 @@ class BaseController():
                 try:
                     headers["Content-Type"] = "application/json"                
                     if res['url_type'] == 'upload':
-                        resource_data = res
+                        resource_data = copy.deepcopy(res)
                         if resource_data.get('datastore_active'):
                             del resource_data['datastore_active']
                         file_content = {'upload': ''}
@@ -137,7 +138,7 @@ class BaseController():
                             # print(uploaded_file.json())
                     
                     else:
-                        resource_data = res
+                        resource_data = copy.deepcopy(res)
                         if resource_data.get('datastore_active'):
                             del resource_data['datastore_active']                    
                         resource_data['package_id'] = just_uploaded_dataset['id']

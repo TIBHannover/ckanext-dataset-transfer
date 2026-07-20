@@ -1,7 +1,9 @@
 # encoding: utf-8
 
+import queue
 from threading import Thread
-import queue, requests
+
+import requests
 import ckan.plugins.toolkit as toolkit
 
 
@@ -48,7 +50,7 @@ class Helper():
                     
                     headers["Content-Type"] = "application/json"
                     if resource['url_type'] == 'upload':
-                        resource_data = resource
+                        resource_data = resource.copy()
                         file_content = {'upload': ''}
                         resource_data['package_id'] = target_dataset_id
                         file_path = resources_dir_path + resource['id'][0:3] + '/' + resource['id'][3:6] + '/' + resource['id'][6:]
@@ -68,7 +70,7 @@ class Helper():
                         self.queue.task_done()
                     
                     else:
-                        resource_data = resource
+                        resource_data = resource.copy()
                         resource_data['package_id'] = target_dataset_id
                         created_resource = requests.post(base_url + "resource_create", headers=headers, json=resource_data)
                         self.results.append(created_resource.status_code)
