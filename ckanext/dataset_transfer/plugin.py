@@ -1,6 +1,3 @@
-import imp
-
-from regex import B
 import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
 from flask import Blueprint
@@ -18,8 +15,6 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
         toolkit.add_template_directory(config_, 'templates')
         toolkit.add_public_directory(config_, 'public')
         toolkit.add_resource('public', 'ckanext-dataset-transfer')
-    
-
 
     #plugin Blueprint
 

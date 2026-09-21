@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-# Always prefer setuptools over distutils
 from setuptools import setup, find_packages
-from codecs import open  # To use a consistent encoding
 from os import path
 
 here = path.abspath(path.dirname(__file__))
@@ -18,12 +16,12 @@ setup(
     # http://packaging.python.org/en/latest/tutorial.html#version
     version='0.0.1',
 
-    description='''''',
+    description='Publish a dataset to another CKAN instance.',
     long_description=long_description,
     long_description_content_type="text/markdown",
 
     # The project's main homepage.
-    url='https://github.com//ckanext-dataset-transfer',
+    url='https://github.com/TIBHannover/ckanext-dataset-transfer',
 
     # Author details
     author='''Pooya Oladazimi''',
@@ -45,12 +43,16 @@ setup(
 
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
-        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Framework :: CKAN',
     ],
+    python_requires='>=3.9',
 
 
     # What does your project relate to?
-    keywords='''CKAN''',
+    keywords='''CKAN dataset publication transfer''',
 
     # You can just specify the packages manually here if your project is
     # simple. Or you can use find_packages().

@@ -4,9 +4,9 @@
 {% block primary_content_inner %}
     {% asset 'ckanext-dataset-transfer/transfer-css' %}
     {% asset 'ckanext-dataset-transfer/transfer-js' %}    
-    <input type="hidden" id="publish_url" value={{h.url_for('dataset_transfer.publish', _external=True)}}>  
-    <input type="hidden" id="check_api_token" value={{h.url_for('dataset_transfer.user_has_api_token', _external=True)}}>  
-    <input type="hidden" id="package_id" value={{pkg_dict.id}}>
+    <input type="hidden" id="publish_url" value="{{ h.url_for('dataset_transfer.publish', _external=True) }}">
+    <input type="hidden" id="check_api_token" value="{{ h.url_for('dataset_transfer.user_has_api_token', _external=True) }}">
+    <input type="hidden" id="package_id" value="{{ pkg_dict.id }}">
     <div class="row">
         <h2 class="modal-title">{{
             _('Publish the dataset <span id="publish_page_dataset_name_in_title">' ~ pkg_dict.title ~ '</span> to LUH data repository')
@@ -16,10 +16,10 @@
     <div class="row">
         <div class="col-sm-12">
             <div class="alert alert-info text-justify" role="alert">
-                <p lang="de">
-                    Bitte stellen Sie sicher, dass Ihr Nutzerkonto im LUH Daten-Repository der Organisation des SFBs zugeordnet ist. Falls dies noch nicht der Fall ist, wenden Sie sich an das INF-Team.
-                </p>
-                <p lang="en">
+                <p>
+                    Bitte stellen Sie sicher, dass Ihr Nutzerkonto im LUH Daten-Repository der Organisation des SFBs zugeordnet ist. Falls dies noch nicht der Fall ist, wenden Sie sich an das INF-Team. </p>
+                <p>
+                  
                     Please make sure that your LUH data repository user account is assigned to the CRC's organization in the LUH data repository. If this is not yet the case, please contact the INF team.
                 </p>
             </div>
