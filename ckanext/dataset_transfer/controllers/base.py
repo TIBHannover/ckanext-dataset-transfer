@@ -2,13 +2,18 @@
 
 import copy
 import json
+import logging
+
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
-from flask import request, render_template
+from flask import Response, request, render_template
 import ckan.plugins.toolkit as toolkit
 from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
 from datetime import datetime as _time
+
+
+log = logging.getLogger(__name__)
 
 
 class BaseController():
@@ -18,12 +23,28 @@ class BaseController():
     base_url = "https://data.uni-hannover.de/api/3/action/" 
     publish_base_url = "https://data.uni-hannover.de/"
 
+    @staticmethod
+    def _json_response(data, status=200):
+        return Response(
+            json.dumps(data),
+            status=status,
+            content_type='application/json; charset=utf-8'
+        )
+
+    @staticmethod
+    def _error_response(error, message, status=500):
+        return BaseController._json_response({
+            "success": False,
+            "error": error,
+            "message": message
+        }, status=status)
+
 
     def publish_page(dataset_name):
         '''
             Render the publish page.
         '''
-        package = toolkit.get_action('package_show')({}, {'name_or_id': dataset_name})
+        package = toolkit.get_action('package_show')({}, {'id': dataset_name})
         if not Helper.check_access_edit_package(package['id']):
                 return toolkit.abort(403, "Not Authorized")
         
@@ -42,10 +63,16 @@ class BaseController():
         '''
         
         try:
+            log.info("Dataset transfer publish request started")
             package_id = request.form.get("package_id")
+            log.info("Dataset transfer publish request for package_id=%s", package_id)
             if(BaseController.is_dataset_published(package_id)):
                 # dataset is already published
-                toolkit.abort(400, "This dataset is already published")
+                return BaseController._error_response(
+                    "Already published",
+                    "This dataset is already published",
+                    400
+                )
 
             org_name = Helper.get_organization_id()
             api_token = request.form.get("api_token")
@@ -53,12 +80,18 @@ class BaseController():
             terms_of_use_consent = request.form.get("terms_of_usage")
             rights_of_use_consent = request.form.get("rights_of_use")
             use_existing_api_token = request.form.get("token_exist_box")
-            dataset = toolkit.get_action('package_show')({}, {'name_or_id': package_id})
+            dataset = toolkit.get_action('package_show')({}, {'id': package_id})
             if not Helper.check_access_edit_package(dataset['id']):
-                    return toolkit.abort(403, "Not Authorized")
+                    return BaseController._error_response(
+                        "Not Authorized", "Not Authorized", 403
+                    )
             
             if terms_of_use_consent != "true" or rights_of_use_consent != "true":
-                return '500'
+                return BaseController._error_response(
+                    "Missing consent",
+                    "Terms of usage and rights of use must be accepted.",
+                    400
+                )
                        
             if use_existing_api_token == "true":
                 # use the user existing api token
@@ -68,7 +101,9 @@ class BaseController():
                     api_token = api_token_obj.get_by_user(id=user_id).api_token                   
                    
                 else:
-                    return toolkit.abort(403, "Invalid request")
+                    return BaseController._error_response(
+                        "Invalid request", "No saved API token found.", 403
+                    )
             
             else:
                 # get the api token from user
@@ -93,8 +128,35 @@ class BaseController():
             resources_dir_path = toolkit.config['ckan.storage_path'] + '/resources/'
             headers = {'Authorization' : api_token.strip()}
             params = {'id': org_name}   
-            org_answer = requests.get(BaseController.base_url + "organization_show", headers=headers, params=params).json()
-            # print(org_answer)
+            log.info(
+                "Dataset transfer LUH organization_show started package_id=%s org=%s",
+                package_id,
+                org_name
+            )
+            org_response = requests.get(
+                BaseController.base_url + "organization_show",
+                headers=headers,
+                params=params
+            )
+            log.info(
+                "Dataset transfer LUH organization_show response package_id=%s status=%s body=%s",
+                package_id,
+                org_response.status_code,
+                org_response.text[:1000]
+            )
+            if org_response.status_code != 200:
+                return BaseController._error_response(
+                    "Remote organization lookup failed",
+                    org_response.text,
+                    502
+                )
+            org_answer = org_response.json()
+            if not org_answer.get('success') or not org_answer.get('result'):
+                return BaseController._error_response(
+                    "Remote organization lookup failed",
+                    org_answer.get('error') or "LUH did not return an organization.",
+                    502
+                )
             resources = copy.deepcopy(dataset.get('resources', []))
             dataset_local_id = dataset['id']
             dataset_to_publish = copy.deepcopy(dataset)
@@ -107,15 +169,32 @@ class BaseController():
             dataset_to_publish['terms_of_usage'] = "Yes"
             dataset_to_publish['have_copyright'] = "Yes"
             headers["Content-Type"] = "application/json"
+            log.info("Dataset transfer LUH package_create started package_id=%s", package_id)
             dataset_created_answer = requests.post(BaseController.base_url + "package_create", headers=headers, json=dataset_to_publish)
-            if dataset_created_answer.status_code != 200 or "id" not in dataset_created_answer.json()['result'].keys():
-                if dataset_created_answer.json().get('error'):
-                    return json.dumps({"error":dataset_created_answer.json()['error']['__type'], "message": dataset_created_answer.json()['error'].get('message')})
+            log.info(
+                "Dataset transfer LUH package_create response package_id=%s status=%s body=%s",
+                package_id,
+                dataset_created_answer.status_code,
+                dataset_created_answer.text[:1000]
+            )
+            dataset_created_json = dataset_created_answer.json()
+            if dataset_created_answer.status_code != 200 or "id" not in dataset_created_json.get('result', {}):
+                if dataset_created_json.get('error'):
+                    error = dataset_created_json['error']
+                    return BaseController._error_response(
+                        error.get('__type', 'Remote package create failed'),
+                        error.get('message') or error,
+                        502
+                    )
                 else:
-                    return "500"
+                    return BaseController._error_response(
+                        "Remote package create failed",
+                        "LUH did not return a dataset id.",
+                        502
+                    )
     
             
-            just_uploaded_dataset = dataset_created_answer.json()['result']
+            just_uploaded_dataset = dataset_created_json['result']
             for res in resources:
                 try:
                     headers["Content-Type"] = "application/json"                
@@ -129,37 +208,96 @@ class BaseController():
                         with open(file_path, 'rb') as file:
                             file_content['upload'] = file.read()
                         
+                        log.info(
+                            "Dataset transfer LUH resource_create started package_id=%s resource_id=%s",
+                            package_id,
+                            res.get('id')
+                        )
                         created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
+                        log.info(
+                            "Dataset transfer LUH resource_create response package_id=%s resource_id=%s status=%s body=%s",
+                            package_id,
+                            res.get('id'),
+                            created_resource.status_code,
+                            created_resource.text[:1000]
+                        )
                         if created_resource.status_code == 200 and 'id' in created_resource.json()['result']:
                             # upload the data file
                             resource_patch_headers = {'Authorization' : api_token.strip()}
                             res_data = {"id": created_resource.json()['result']['id']} 
+                            log.info(
+                                "Dataset transfer LUH resource_patch upload started package_id=%s resource_id=%s",
+                                package_id,
+                                res.get('id')
+                            )
                             uploaded_file = requests.post(BaseController.base_url + "resource_patch", data=res_data, headers=resource_patch_headers, files=file_content)
-                            # print(uploaded_file.json())
+                            log.info(
+                                "Dataset transfer LUH resource_patch response package_id=%s resource_id=%s status=%s body=%s",
+                                package_id,
+                                res.get('id'),
+                                uploaded_file.status_code,
+                                uploaded_file.text[:1000]
+                            )
                     
                     else:
                         resource_data = copy.deepcopy(res)
                         if resource_data.get('datastore_active'):
                             del resource_data['datastore_active']                    
                         resource_data['package_id'] = just_uploaded_dataset['id']
+                        log.info(
+                            "Dataset transfer LUH resource_create started package_id=%s resource_id=%s",
+                            package_id,
+                            res.get('id')
+                        )
                         created_resource = requests.post(BaseController.base_url + "resource_create", headers=headers, json=resource_data)
-                except:
+                        log.info(
+                            "Dataset transfer LUH resource_create response package_id=%s resource_id=%s status=%s body=%s",
+                            package_id,
+                            res.get('id'),
+                            created_resource.status_code,
+                            created_resource.text[:1000]
+                        )
+                except Exception:
+                    log.exception(
+                        "Dataset transfer resource upload failed package_id=%s resource_id=%s",
+                        package_id,
+                        res.get('id')
+                    )
                     continue
                     
             just_uploaded_dataset["published_url"] = BaseController.publish_base_url + "dataset/" + just_uploaded_dataset['name']
             dataset_db_object = PublishedDataset(
                 dataset_id=dataset_local_id,
-                doi=just_uploaded_dataset['doi'],
+                doi=just_uploaded_dataset.get('doi') or '',
                 published_url=just_uploaded_dataset['published_url'],
                 published_dataset_id=just_uploaded_dataset['id'],
                 publish_time=_time.now()
             )
-            dataset_db_object.save()            
-            return just_uploaded_dataset
+            dataset_db_object.save()
+            log.info(
+                "Dataset transfer upload completed package_id=%s published_dataset_id=%s published_url=%s",
+                package_id,
+                just_uploaded_dataset['id'],
+                just_uploaded_dataset['published_url']
+            )
+            response_data = {
+                "success": True,
+                "doi": just_uploaded_dataset.get('doi') or '',
+                "published_url": just_uploaded_dataset['published_url'],
+                "published_dataset_id": just_uploaded_dataset['id']
+            }
+            log.info(
+                "Dataset transfer backend response returned to browser package_id=%s success=True",
+                package_id
+            )
+            return BaseController._json_response(response_data)
         
-        except:
-            # return '500'
-            raise
+        except Exception as error:
+            log.exception(
+                "Dataset transfer publish failed before response package_id=%s",
+                request.form.get("package_id")
+            )
+            return BaseController._error_response("Internal error", str(error), 500)
 
 
 

@@ -15,6 +15,7 @@ class FakeResponse(object):
     def __init__(self, status_code=200, payload=None):
         self.status_code = status_code
         self._payload = payload or {}
+        self.text = json.dumps(self._payload)
 
     def json(self):
         return self._payload
@@ -55,8 +56,8 @@ def _body(response):
     return response.body
 
 
-def _remote_user(user):
-    return {"REMOTE_USER": user["name"].encode("ascii")}
+def _auth_headers(user):
+    return {"Authorization": user["token"]}
 
 
 def test_plugin_loads():
@@ -75,12 +76,12 @@ def test_database_migration_initializes_tables(dataset_transfer_migrated_db):
     assert inspector.has_table("publish_api_token")
 
 
-@pytest.mark.usefixtures("dataset_transfer_migrated_db", "with_request_context")
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
 def test_publish_page_renders_for_editor(app):
     import ckan.tests.factories as factories
     import ckan.plugins.toolkit as toolkit
 
-    user = factories.Sysadmin()
+    user = factories.SysadminWithToken()
     dataset = factories.Dataset(
         title="Migration test dataset",
         author="Author",
@@ -92,9 +93,9 @@ def test_publish_page_renders_for_editor(app):
     url = toolkit.url_for(
         "dataset_transfer.publish_page", dataset_name=dataset["name"]
     )
-    response = app.get(url, extra_environ=_remote_user(user))
+    response = app.get(url, headers=_auth_headers(user))
 
-    assert response.status_code == 200
+    assert response.status_code == 200, _body(response)
     assert "Publish the dataset" in _body(response)
     assert 'id="publish_url"' in _body(response)
 
@@ -103,22 +104,50 @@ def test_publish_page_renders_for_editor(app):
 def test_user_has_api_token_route_returns_false_for_authenticated_user(app):
     import ckan.tests.factories as factories
 
-    user = factories.Sysadmin()
+    user = factories.SysadminWithToken()
 
     response = app.get(
         "/dataset_transfer/user_has_api_token",
-        extra_environ=_remote_user(user),
+        headers=_auth_headers(user),
     )
 
     assert response.status_code == 200
     assert _body(response) == "False"
 
 
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_publish_rejects_missing_consent_with_json_error(app):
+    import ckan.tests.factories as factories
+
+    user = factories.SysadminWithToken()
+    dataset = factories.Dataset()
+
+    response = app.post(
+        "/dataset_transfer/publish",
+        params={
+            "package_id": dataset["id"],
+            "api_token": "token",
+            "save_api_token_box": "false",
+            "token_exist_box": "false",
+            "terms_of_usage": "false",
+            "rights_of_use": "true",
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 400
+    assert response.json == {
+        "success": False,
+        "error": "Missing consent",
+        "message": "Terms of usage and rights of use must be accepted.",
+    }
+
+
 def test_load_publish_form_data_uses_mocked_remote_api(app, monkeypatch):
     import ckan.tests.factories as factories
     from ckanext.dataset_transfer.controllers import base
 
-    user = factories.Sysadmin()
+    user = factories.SysadminWithToken()
     calls = []
     original_get = requests.get
 
@@ -133,6 +162,7 @@ def test_load_publish_form_data_uses_mocked_remote_api(app, monkeypatch):
         return FakeResponse(
             200,
             {
+                "success": True,
                 "result": [
                     {"name": "sfb_1153", "title": "SFB 1153"},
                     {"name": "sfb_1368", "title": "SFB 1368"},
@@ -149,7 +179,7 @@ def test_load_publish_form_data_uses_mocked_remote_api(app, monkeypatch):
             "api_token": "token",
             "token_exist_box": "false",
         },
-        extra_environ=_remote_user(user),
+        headers=_auth_headers(user),
     )
 
     assert response.status_code == 200
@@ -169,7 +199,7 @@ def test_publish_dataset_with_url_and_uploaded_resources_uses_mocked_api(
     from ckanext.dataset_transfer.controllers import base
     from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 
-    user = factories.Sysadmin()
+    user = factories.SysadminWithToken()
     storage_path = tmp_path / "ckan-storage"
     upload_id = "abcdef1234567890abcdef1234567890"
     upload_dir = storage_path / "resources" / upload_id[:3] / upload_id[3:6]
@@ -227,7 +257,9 @@ def test_publish_dataset_with_url_and_uploaded_resources_uses_mocked_api(
             return original_get(url, headers=headers, params=params, **kwargs)
         calls.append(("GET", url, {"headers": headers, "params": params}))
         assert url.endswith("/organization_show")
-        return FakeResponse(200, {"result": {"id": "target-org-id"}})
+        return FakeResponse(
+            200, {"success": True, "result": {"id": "target-org-id"}}
+        )
 
     def fake_post(url, headers=None, json=None, data=None, files=None, **kwargs):
         calls.append(
@@ -246,6 +278,7 @@ def test_publish_dataset_with_url_and_uploaded_resources_uses_mocked_api(
             return FakeResponse(
                 200,
                 {
+                    "success": True,
                     "result": {
                         "id": "target-dataset-id",
                         "name": "target-dataset",
@@ -279,10 +312,11 @@ def test_publish_dataset_with_url_and_uploaded_resources_uses_mocked_api(
             "terms_of_usage": "true",
             "rights_of_use": "true",
         },
-        extra_environ=_remote_user(user),
+        headers=_auth_headers(user),
     )
 
     assert response.status_code == 200
+    assert response.json["success"] is True
     assert response.json["doi"] == "10.123/test"
     assert response.json["published_url"].endswith("/dataset/target-dataset")
     assert [call[1].rsplit("/", 1)[-1] for call in calls] == [
