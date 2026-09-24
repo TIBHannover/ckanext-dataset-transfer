@@ -12,7 +12,8 @@ Compatibility with core CKAN versions:
 | --------------- | ------------- |
 | 2.8 and earlier | not tested    |
 | 2.9             | not tested in current branch |
-| 2.10.7          | Yes |
+| 2.10            | Yes, tested in Docker with Python 3.10 |
+| 2.11            | Yes, tested in Docker with Python 3.10 |
 
 
 ## Installation
@@ -26,7 +27,7 @@ To install ckanext-dataset-transfer:
 
 2. Clone the source and install it on the virtualenv
 
-        git clone https://github.com//ckanext-dataset-transfer.git
+        git clone https://github.com/TIBHannover/ckanext-dataset-transfer.git
         cd ckanext-dataset-transfer
         pip install -e .
         pip install -r requirements.txt
