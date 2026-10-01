@@ -11,8 +11,6 @@ transfer-js:
       - vendor/vendor
       - vendor/bootstrap
       - vendor/jquery
-      - vendor/jquery.ui.core
-      - vendor/select2
   contents:
     - transfer.js
 
