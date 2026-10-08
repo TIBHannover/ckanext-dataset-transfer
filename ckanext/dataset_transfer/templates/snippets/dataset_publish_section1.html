@@ -3,8 +3,8 @@
         <div class="col-sm-12">
             <div class="alert alert-info text-justify">
                 <p>
-                    {{_('Please note: We need your API token from LUH data repository to be able to publish your dataset.
-                        If you already stored your LUH API token, you can skip this by clicking the checkbox.
+                    {{_('Please note: For LUH publishing, we need your API token from the LUH data repository.
+                        If you already stored your LUH API token, you can skip this by clicking the checkbox. RADAR publishing uses the CKAN server configuration.
                     ')}}
                 </p>
             </div>
@@ -55,7 +55,7 @@
         <div class="col-sm-12">
             {{ macro.input('api_token', 
                 id='transfer_api_token_input', 
-                label=_('Your LUH API Token'),                          
+                label=_('Your LUH API Token'),
                 classes=['control-medium'] ,
                 placeholder="My API token is ...")
             }}

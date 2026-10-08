@@ -8,9 +8,9 @@
     <input type="hidden" id="check_api_token" value="{{ h.url_for('dataset_transfer.user_has_api_token', _external=True) }}">
     <input type="hidden" id="package_id" value="{{ pkg_dict.id }}">
     <div class="row">
-        <h2 class="modal-title">{{
-            _('Publish the dataset <span id="publish_page_dataset_name_in_title">' ~ pkg_dict.title ~ '</span> to LUH data repository')
-            }}
+        <h2 class="modal-title">
+            {{ _('Publish the dataset') }}
+            <span id="publish_page_dataset_name_in_title">{{ pkg_dict.title }}</span>
         </h2>
     </div>
     <br>
@@ -18,14 +18,24 @@
         <div class="col-sm-12">
             <div class="alert alert-info text-justify" role="alert">
                 <p lang="de">
-                    Bitte stellen Sie sicher, dass Ihr Nutzerkonto im LUH Daten-Repository der Organisation des SFBs zugeordnet ist. Falls dies noch nicht der Fall ist, wenden Sie sich an das INF-Team.
+                    Bitte wählen Sie aus, wohin der Datensatz veröffentlicht werden soll. Für RADAR werden die Zugangsdaten aus der CKAN-Konfiguration verwendet.
                 </p>
                 <p lang="en">
-                    Please make sure that your LUH data repository user account is assigned to the CRC's organization in the LUH data repository. If this is not yet the case, please contact the INF team.
+                    Please choose where the dataset should be published. RADAR uses the credentials configured in CKAN.
                 </p>
             </div>
         </div>
     </div>
+    <div class="row">
+        <div class="col-sm-12">
+            <label for="publish_target">{{ _('Publish target') }}</label>
+            <select class="form-control" id="publish_target" name="publish_target">
+                <option value="luh">{{ _('LUH data repository') }}</option>
+                <option value="radar">{{ _('RADAR') }}</option>
+            </select>
+        </div>
+    </div>
+    <br>
     {% snippet "snippets/dataset_publish_section1.html", macro=macro %}
     {% snippet "snippets/dataset_publish_section2.html" %}
     {% snippet "snippets/dataset_publish_section3.html", pkg_dict=pkg_dict %}

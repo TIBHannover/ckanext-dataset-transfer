@@ -330,6 +330,127 @@ def test_publish_dataset_with_url_and_uploaded_resources_uses_mocked_api(
     assert PublishedDataset.get_by_dataset("local-dataset-id").doi == "10.123/test"
 
 
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_publish_dataset_to_radar_uses_mocked_api(app, monkeypatch, tmp_path):
+    import ckan.plugins.toolkit as toolkit
+    import ckan.tests.factories as factories
+    from ckanext.dataset_transfer.controllers import base
+    from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
+
+    user = factories.SysadminWithToken()
+    storage_path = tmp_path / "ckan-storage"
+    upload_id = "fedcba1234567890fedcba1234567890"
+    upload_dir = storage_path / "resources" / upload_id[:3] / upload_id[3:6]
+    upload_dir.mkdir(parents=True)
+    (upload_dir / upload_id[6:]).write_bytes(b"radar resource data")
+
+    dataset = {
+        "id": "local-radar-dataset-id",
+        "name": "local-radar-dataset",
+        "title": "Local RADAR Dataset",
+        "notes": "Dataset to test RADAR publishing",
+        "author": "Radar Author",
+        "author_email": "author@example.test",
+        "maintainer": "Radar Maintainer",
+        "maintainer_email": "maintainer@example.test",
+        "tags": [{"name": "radar"}, {"display_name": "ckan"}],
+        "resources": [
+            {
+                "id": upload_id,
+                "name": "radar-upload.txt",
+                "url": "radar-upload.txt",
+                "url_type": "upload",
+            }
+        ],
+    }
+    calls = []
+
+    monkeypatch.setitem(toolkit.config, "ckan.storage_path", str(storage_path))
+    monkeypatch.setitem(toolkit.config, "ckan.site_url", "https://ckan.example.test")
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.radar.context_url",
+        "https://test.radar-service.eu/radar",
+    )
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.radar.workspace_id",
+        "workspace-id",
+    )
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.radar.responsible_email",
+        "data@example.test",
+    )
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.radar.access_token",
+        "radar-access-token",
+    )
+    monkeypatch.setattr(
+        base.Helper, "check_access_edit_package", lambda package_id: True
+    )
+    monkeypatch.setattr(
+        base.toolkit,
+        "get_action",
+        lambda name: (
+            lambda context, data_dict: dataset
+            if name == "package_show"
+            else pytest.fail("Unexpected CKAN action: {}".format(name))
+        ),
+    )
+
+    def fake_post(url, headers=None, json=None, files=None, **kwargs):
+        calls.append(("POST", url, {"headers": headers, "json": json, "files": files}))
+        if url.endswith("/api/workspaces/workspace-id/datasets"):
+            assert headers["Authorization"] == "Bearer radar-access-token"
+            assert json["parentId"] == "workspace-id"
+            assert json["technicalMetadata"]["schema"] == {"key": "RDDM", "version": "9.3"}
+            assert json["technicalMetadata"]["publicationBacklink"].endswith(
+                "/dataset/local-radar-dataset"
+            )
+            return FakeResponse(200, {"id": "radar-dataset-id"})
+        if url.endswith("/api/datasets/radar-dataset-id/metadata"):
+            metadata = files["metadataFile"][1]
+            assert b"Local RADAR Dataset" in metadata
+            assert b"Radar Author" in metadata
+            return FakeResponse(200, {"success": True})
+        if url.endswith("/radar-ingest/upload/radar-dataset-id/ingest"):
+            archive = files["file"][1]
+            assert archive.getvalue()
+            return FakeResponse(200, {"success": True})
+        pytest.fail("Unexpected RADAR post: {}".format(url))
+
+    def fake_get(url, headers=None, **kwargs):
+        calls.append(("GET", url, {"headers": headers}))
+        if url.endswith("/api/datasets/radar-dataset-id/metadata/validate"):
+            return FakeResponse(200, {"valid": True})
+        if url.endswith("/api/datasets/radar-dataset-id/doi"):
+            return FakeResponse(200, {"doi": "10.123/radar"})
+        pytest.fail("Unexpected RADAR get: {}".format(url))
+
+    monkeypatch.setattr(base.requests, "post", fake_post)
+    monkeypatch.setattr(base.requests, "get", fake_get)
+
+    response = app.post(
+        "/dataset_transfer/publish",
+        params={
+            "package_id": dataset["id"],
+            "publish_target": "radar",
+            "terms_of_usage": "true",
+            "rights_of_use": "true",
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 200
+    assert response.json["success"] is True
+    assert response.json["doi"] == "10.123/radar"
+    assert response.json["published_dataset_id"] == "radar-dataset-id"
+    assert [call[0] for call in calls] == ["POST", "POST", "GET", "POST", "GET"]
+    assert PublishedDataset.get_by_dataset("local-radar-dataset-id").doi == "10.123/radar"
+
+
 def test_unmocked_requests_are_blocked():
     with pytest.raises(AssertionError):
         requests.post("https://data.uni-hannover.de/api/3/action/package_create")

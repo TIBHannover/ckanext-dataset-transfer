@@ -1,6 +1,7 @@
 $(document).ready(function(){
     
     check_user_has_api_token_and_show_message();
+    update_publish_target_fields();
 
     /**
      * Click on the next button
@@ -8,6 +9,12 @@ $(document).ready(function(){
     $('#dataset_transfer_next_btn').click(function(){
         let step = $(this).attr("step");
         if( step === "2"){
+            if($('#publish_target').val() === "radar"){
+                $('#publish_step1').hide();
+                $('#publish_step2').show();
+                $(this).attr("step", "3");
+                return;
+            }
             // console.info($('#token_exist_box').is(':checked'))
             if($('#token_exist_box').prop('checked') === false && $('#transfer_api_token_input').val() === ""){                
                 $('#api_token_input_empty_alert_box').show();
@@ -56,6 +63,7 @@ $(document).ready(function(){
         let dest_url = $('#publish_url').val();        
         let formdata = new FormData();
         formdata.set('package_id', $('#package_id').val());        
+        formdata.set('publish_target', $('#publish_target').val());
         formdata.set('api_token', $("#transfer_api_token_input").val());
         formdata.set('save_api_token_box', $("#save_api_token_box").prop('checked'));
         formdata.set('token_exist_box', $("#token_exist_box").prop('checked'));
@@ -131,7 +139,28 @@ $(document).ready(function(){
         $('#no_consent_alert_message').hide();
      });
 
+     $('#publish_target').change(function(){
+        update_publish_target_fields();
+     });
+
 });
+
+function update_publish_target_fields(){
+    if($('#publish_target').val() === "radar"){
+        $('#transfer_api_token_input').closest('.form-group').hide();
+        $('#save_api_token_box').closest('label').hide();
+        $('#token_exist_box').closest('label').hide();
+        $('#api_token_exist_info_box').hide();
+        $('#api_token_not_exist_alert_box').hide();
+        $('#api_token_input_empty_alert_box').hide();
+    }
+    else{
+        $('#transfer_api_token_input').closest('.form-group').show();
+        $('#save_api_token_box').closest('label').show();
+        $('#token_exist_box').closest('label').show();
+        check_user_has_api_token_and_show_message();
+    }
+}
 
 function parse_publish_response(responseText){
     if (responseText === "500") {

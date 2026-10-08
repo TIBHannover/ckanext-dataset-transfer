@@ -10,6 +10,11 @@ from flask import Response, request, render_template
 import ckan.plugins.toolkit as toolkit
 from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
+from ckanext.dataset_transfer.services.radar import (
+    RadarConfigError,
+    RadarPublishError,
+    RadarPublisher,
+)
 from datetime import datetime as _time
 
 
@@ -75,6 +80,7 @@ class BaseController():
                 )
 
             org_name = Helper.get_organization_id()
+            publish_target = request.form.get("publish_target") or "luh"
             api_token = request.form.get("api_token")
             save_api_token = request.form.get("save_api_token_box")
             terms_of_use_consent = request.form.get("terms_of_usage")
@@ -90,6 +96,35 @@ class BaseController():
                 return BaseController._error_response(
                     "Missing consent",
                     "Terms of usage and rights of use must be accepted.",
+                    400
+                )
+
+            if publish_target == "radar":
+                try:
+                    radar_result = RadarPublisher().publish_dataset(dataset)
+                except RadarConfigError as error:
+                    return BaseController._error_response(
+                        "RADAR configuration missing", str(error), 400
+                    )
+                except RadarPublishError as error:
+                    return BaseController._error_response(
+                        "RADAR publish failed", str(error), 502
+                    )
+
+                dataset_db_object = PublishedDataset(
+                    dataset_id=dataset["id"],
+                    doi=radar_result.get("doi") or "",
+                    published_url=radar_result["published_url"],
+                    published_dataset_id=radar_result["published_dataset_id"],
+                    publish_time=_time.now()
+                )
+                dataset_db_object.save()
+                return BaseController._json_response(radar_result)
+
+            if publish_target != "luh":
+                return BaseController._error_response(
+                    "Invalid publish target",
+                    "Unknown publish target: {}".format(publish_target),
                     400
                 )
                        

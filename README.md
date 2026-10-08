@@ -45,6 +45,47 @@ To install ckanext-dataset-transfer:
         sudo service nginx reload
 
 
+## RADAR Test Configuration
+
+RADAR publishing can be tested from the same publish page by selecting
+`RADAR` as the publish target.
+
+Add the RADAR test settings to your local CKAN config:
+
+    ckanext.dataset_transfer.radar.context_url = https://test.radar-service.eu/radar
+    ckanext.dataset_transfer.radar.ingest_url = https://test.radar-service.eu/radar-ingest
+    ckanext.dataset_transfer.radar.workspace_id = YOUR_WORKSPACE_ID
+    ckanext.dataset_transfer.radar.responsible_email = your-email@example.org
+    ckanext.dataset_transfer.radar.retention_period = 10
+    ckanext.dataset_transfer.radar.schema_key = RDDM
+    ckanext.dataset_transfer.radar.schema_version = 9.3
+    ckanext.dataset_transfer.radar.publisher = TIB
+    ckanext.dataset_transfer.radar.default_subject_area = Other
+    ckanext.dataset_transfer.radar.default_rights = Other
+    ckanext.dataset_transfer.radar.metadata_identifier_prefix = 10.0000
+
+For local testing, either provide a temporary RADAR access token:
+
+    ckanext.dataset_transfer.radar.access_token = YOUR_ACCESS_TOKEN
+
+Or provide the OAuth credentials so the extension can request a token:
+
+    ckanext.dataset_transfer.radar.client_id = tib
+    ckanext.dataset_transfer.radar.client_secret = YOUR_CLIENT_SECRET
+    ckanext.dataset_transfer.radar.redirect_url = https://www.tib.eu
+    ckanext.dataset_transfer.radar.user_name = YOUR_RADAR_USERNAME
+    ckanext.dataset_transfer.radar.user_password = YOUR_RADAR_PASSWORD
+
+The generated descriptive metadata XML is validated locally against the bundled
+RADAR v9.3 descriptive schema, uploaded to RADAR, and then checked with RADAR's
+`/metadata/validate` endpoint. To override the bundled schema path, set:
+
+    ckanext.dataset_transfer.radar.descriptive_xsd_path = /path/to/RadarDataset.xsd
+
+When overriding the schema path, keep the RADAR v9.3 `RadarDataset.xsd`,
+`RadarElements.xsd`, and `RadarTypes.xsd` files in the same directory because
+the dataset schema imports the other two schemas.
+
 
 ## License
 
