@@ -364,6 +364,7 @@ def test_publish_dataset_to_radar_uses_mocked_api(app, monkeypatch, tmp_path):
         ],
     }
     calls = []
+    original_get = requests.get
 
     monkeypatch.setitem(toolkit.config, "ckan.storage_path", str(storage_path))
     monkeypatch.setitem(toolkit.config, "ckan.site_url", "https://ckan.example.test")
@@ -422,6 +423,8 @@ def test_publish_dataset_to_radar_uses_mocked_api(app, monkeypatch, tmp_path):
         pytest.fail("Unexpected RADAR post: {}".format(url))
 
     def fake_get(url, headers=None, **kwargs):
+        if urlparse(url).hostname in {"solr", "localhost", "127.0.0.1", "ckan"}:
+            return original_get(url, headers=headers, **kwargs)
         calls.append(("GET", url, {"headers": headers}))
         if url.endswith("/api/datasets/radar-dataset-id/metadata/validate"):
             return FakeResponse(200, {"valid": True})

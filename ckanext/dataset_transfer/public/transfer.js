@@ -86,15 +86,39 @@ $(document).ready(function(){
             }
         };
         req.onerror = function() {
-            console.error("Dataset transfer publish request failed");
-            show_publish_failure("Network error", "The publish request could not reach the server.");
+            console.error("Dataset transfer publish request failed", {
+                url: dest_url,
+                status: req.status,
+                responseText: req.responseText
+            });
+            if (req.status && req.responseText) {
+                let data = parse_publish_response(req.responseText);
+                show_publish_failure(
+                    data && data.error ? data.error : "HTTP " + req.status,
+                    data && data.message ? data.message : get_publish_error_message(req)
+                );
+            }
+            else {
+                show_publish_failure(
+                    "Network error",
+                    "The publish request could not reach the server. Please check the CKAN server logs for dataset_transfer/RADAR entries."
+                );
+            }
         };
         req.ontimeout = function() {
-            console.error("Dataset transfer publish request timed out");
+            console.error("Dataset transfer publish request timed out", {
+                url: dest_url,
+                status: req.status,
+                responseText: req.responseText
+            });
             show_publish_failure("Timeout", "Publishing took too long and the browser stopped waiting. Please check the dataset page before trying again.");
         };
         req.onabort = function() {
-            console.error("Dataset transfer publish request aborted");
+            console.error("Dataset transfer publish request aborted", {
+                url: dest_url,
+                status: req.status,
+                responseText: req.responseText
+            });
             show_publish_failure("Aborted", "The publish request was aborted.");
         };
         req.open("POST", dest_url);

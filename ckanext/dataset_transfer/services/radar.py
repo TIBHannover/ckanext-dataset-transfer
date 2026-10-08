@@ -12,6 +12,7 @@ import ckan.plugins.toolkit as toolkit
 
 
 log = logging.getLogger(__name__)
+LOG_BODY_LIMIT = 2000
 
 DEFAULT_RADAR_DATASET_XSD = (
     Path(__file__).resolve().parent.parent
@@ -96,9 +97,11 @@ class RadarPublisher(object):
     def _access_token(self):
         configured_token = self.config.get("ckanext.dataset_transfer.radar.access_token")
         if configured_token:
+            log.info("RADAR publish using configured access token")
             return configured_token
 
         token_url = self.context_url + "/api/tokens"
+        log.info("RADAR token request started url=%s", token_url)
         token_payload = {
             "clientId": self._required("ckanext.dataset_transfer.radar.client_id"),
             "clientSecret": self._required("ckanext.dataset_transfer.radar.client_secret"),
@@ -106,7 +109,12 @@ class RadarPublisher(object):
             "userName": self._required("ckanext.dataset_transfer.radar.user_name"),
             "userPassword": self._required("ckanext.dataset_transfer.radar.user_password"),
         }
-        response = self.requests.post(token_url, json=token_payload)
+        try:
+            response = self.requests.post(token_url, json=token_payload, timeout=60)
+        except requests.RequestException as error:
+            log.exception("RADAR token request failed url=%s", token_url)
+            raise RadarPublishError("RADAR token request failed: {}".format(error))
+        _log_response("RADAR token response", response)
         self._raise_for_radar(response, "RADAR token request failed")
         token_json = response.json()
         if not token_json.get("access_token"):
@@ -114,6 +122,12 @@ class RadarPublisher(object):
         return token_json["access_token"]
 
     def publish_dataset(self, dataset):
+        log.info(
+            "RADAR publish started package_id=%s package_name=%s resource_count=%s",
+            dataset.get("id"),
+            dataset.get("name"),
+            len(dataset.get("resources") or []),
+        )
         access_token = self._access_token()
         headers = {"Authorization": "Bearer {}".format(access_token)}
 
@@ -127,16 +141,45 @@ class RadarPublisher(object):
             subject_area=self.default_subject_area,
             rights=self.default_rights,
         )
+        log.info(
+            "RADAR metadata XML generated package_id=%s bytes=%s xsd_path=%s",
+            dataset.get("id"),
+            len(metadata_xml),
+            self.descriptive_xsd_path,
+        )
         validate_radar_metadata_xml(metadata_xml, self.descriptive_xsd_path)
+        log.info("RADAR local metadata validation passed package_id=%s", dataset.get("id"))
         self._upload_metadata(dataset_id, metadata_xml, headers)
         self._validate_uploaded_metadata(dataset_id, headers)
 
         archive = build_resource_archive(dataset)
         if archive is not None:
+            archive.seek(0, os.SEEK_END)
+            archive_size = archive.tell()
+            archive.seek(0)
+            log.info(
+                "RADAR resource archive built package_id=%s dataset_id=%s bytes=%s",
+                dataset.get("id"),
+                dataset_id,
+                archive_size,
+            )
             self._upload_archive(dataset_id, archive, headers)
+        else:
+            log.info(
+                "RADAR resource archive skipped package_id=%s dataset_id=%s reason=no_resources",
+                dataset.get("id"),
+                dataset_id,
+            )
 
         doi = self._read_doi(dataset_id, headers)
         published_url = self.dataset_url_template.format(dataset_id=dataset_id)
+        log.info(
+            "RADAR publish completed package_id=%s dataset_id=%s doi=%s published_url=%s",
+            dataset.get("id"),
+            dataset_id,
+            doi,
+            published_url,
+        )
         return {
             "success": True,
             "doi": doi,
@@ -162,65 +205,119 @@ class RadarPublisher(object):
                 "title": dataset.get("title") or dataset.get("name") or "CKAN dataset",
             },
         }
-        response = self.requests.post(
-            self.context_url + "/api/workspaces/{}/datasets".format(self.workspace_id),
-            headers=dict(headers, **{"Content-Type": "application/json"}),
-            json=payload,
+        url = self.context_url + "/api/workspaces/{}/datasets".format(self.workspace_id)
+        log.info(
+            "RADAR dataset create request package_id=%s workspace_id=%s url=%s",
+            dataset.get("id"),
+            self.workspace_id,
+            url,
         )
+        try:
+            response = self.requests.post(
+                url,
+                headers=dict(headers, **{"Content-Type": "application/json"}),
+                json=payload,
+                timeout=120,
+            )
+        except requests.RequestException as error:
+            log.exception("RADAR dataset create request failed package_id=%s url=%s", dataset.get("id"), url)
+            raise RadarPublishError("RADAR dataset creation failed: {}".format(error))
+        _log_response("RADAR dataset create response", response)
         self._raise_for_radar(response, "RADAR dataset creation failed")
         created = response.json()
         if not created.get("id"):
+            log.error("RADAR dataset create response missing id body=%s", _response_text(response))
             raise RadarPublishError("RADAR did not return a dataset id")
+        log.info(
+            "RADAR dataset created package_id=%s dataset_id=%s",
+            dataset.get("id"),
+            created.get("id"),
+        )
         return created
 
     def _upload_metadata(self, dataset_id, metadata_xml, headers):
-        response = self.requests.post(
-            self.context_url + "/api/datasets/{}/metadata".format(dataset_id),
-            headers=headers,
-            files={
-                "metadataFile": (
-                    "radar-metadata.xml",
-                    metadata_xml,
-                    "application/xml",
-                )
-            },
+        url = self.context_url + "/api/datasets/{}/metadata".format(dataset_id)
+        log.info(
+            "RADAR metadata upload request dataset_id=%s url=%s bytes=%s",
+            dataset_id,
+            url,
+            len(metadata_xml),
         )
+        try:
+            response = self.requests.post(
+                url,
+                headers=headers,
+                files={
+                    "metadataFile": (
+                        "radar-metadata.xml",
+                        metadata_xml,
+                        "application/xml",
+                    )
+                },
+                timeout=120,
+            )
+        except requests.RequestException as error:
+            log.exception("RADAR metadata upload request failed dataset_id=%s url=%s", dataset_id, url)
+            raise RadarPublishError("RADAR metadata upload failed: {}".format(error))
+        _log_response("RADAR metadata upload response", response)
         self._raise_for_radar(response, "RADAR metadata upload failed")
 
     def _validate_uploaded_metadata(self, dataset_id, headers):
-        response = self.requests.get(
-            self.context_url + "/api/datasets/{}/metadata/validate".format(dataset_id),
-            headers=headers,
-        )
+        url = self.context_url + "/api/datasets/{}/metadata/validate".format(dataset_id)
+        log.info("RADAR metadata validation request dataset_id=%s url=%s", dataset_id, url)
+        try:
+            response = self.requests.get(url, headers=headers, timeout=120)
+        except requests.RequestException as error:
+            log.exception("RADAR metadata validation request failed dataset_id=%s url=%s", dataset_id, url)
+            raise RadarPublishError("RADAR metadata validation failed: {}".format(error))
+        _log_response("RADAR metadata validation response", response)
         self._raise_for_radar(response, "RADAR metadata validation failed")
         try:
             validation_json = response.json()
         except ValueError:
             validation_json = {}
         if isinstance(validation_json, dict) and validation_json.get("valid") is False:
+            log.error(
+                "RADAR metadata validation failed dataset_id=%s result=%s",
+                dataset_id,
+                validation_json,
+            )
             raise RadarPublishError(
                 "RADAR metadata validation failed: {}".format(validation_json)
             )
+        log.info("RADAR metadata validation passed dataset_id=%s result=%s", dataset_id, validation_json)
 
     def _upload_archive(self, dataset_id, archive, headers):
-        response = self.requests.post(
-            self.ingest_url + "/upload/{}/ingest".format(dataset_id),
-            headers=headers,
-            files={"file": ("ckan-resources.zip", archive, "application/zip")},
-        )
+        url = self.ingest_url + "/upload/{}/ingest".format(dataset_id)
+        log.info("RADAR ingest upload request dataset_id=%s url=%s", dataset_id, url)
+        try:
+            response = self.requests.post(
+                url,
+                headers=headers,
+                files={"file": ("ckan-resources.zip", archive, "application/zip")},
+                timeout=1800,
+            )
+        except requests.RequestException as error:
+            log.exception("RADAR ingest upload request failed dataset_id=%s url=%s", dataset_id, url)
+            raise RadarPublishError("RADAR content ingest failed: {}".format(error))
+        _log_response("RADAR ingest upload response", response)
         self._raise_for_radar(response, "RADAR content ingest failed")
 
     def _read_doi(self, dataset_id, headers):
-        response = self.requests.get(
-            self.context_url + "/api/datasets/{}/doi".format(dataset_id),
-            headers=headers,
-        )
+        url = self.context_url + "/api/datasets/{}/doi".format(dataset_id)
+        log.info("RADAR DOI lookup request dataset_id=%s url=%s", dataset_id, url)
+        try:
+            response = self.requests.get(url, headers=headers, timeout=120)
+        except requests.RequestException as error:
+            log.exception("RADAR DOI lookup request failed dataset_id=%s url=%s", dataset_id, url)
+            return ""
+        _log_response("RADAR DOI lookup response", response)
         if response.status_code != 200:
             log.info(
                 "RADAR DOI lookup skipped dataset_id=%s status=%s body=%s",
                 dataset_id,
                 response.status_code,
-                response.text[:1000],
+                _response_text(response),
             )
             return ""
         try:
@@ -234,8 +331,15 @@ class RadarPublisher(object):
     def _raise_for_radar(self, response, message):
         if 200 <= response.status_code < 300:
             return
+        log.error(
+            "%s status=%s url=%s body=%s",
+            message,
+            response.status_code,
+            getattr(response, "url", ""),
+            _response_text(response),
+        )
         raise RadarPublishError(
-            "{}: HTTP {} {}".format(message, response.status_code, response.text[:1000])
+            "{}: HTTP {} {}".format(message, response.status_code, _response_text(response))
         )
 
 
@@ -325,6 +429,7 @@ def build_radar_metadata_xml(
 
 
 def validate_radar_metadata_xml(metadata_xml, xsd_path=None):
+    log.info("RADAR local metadata validation started xsd_path=%s", xsd_path)
     ET.fromstring(metadata_xml)
     if not xsd_path:
         return
@@ -349,9 +454,26 @@ def validate_radar_metadata_xml(metadata_xml, xsd_path=None):
         )
     document = etree.fromstring(metadata_xml)
     if not schema.validate(document):
+        log.error("RADAR local metadata validation failed errors=%s", schema.error_log)
         raise RadarPublishError(
             "Generated RADAR metadata XML is invalid: {}".format(schema.error_log)
         )
+    log.info("RADAR local metadata validation completed xsd_path=%s", xsd_path)
+
+
+def _response_text(response):
+    text = getattr(response, "text", "") or ""
+    return text[:LOG_BODY_LIMIT]
+
+
+def _log_response(message, response):
+    log.info(
+        "%s status=%s url=%s body=%s",
+        message,
+        getattr(response, "status_code", ""),
+        getattr(response, "url", ""),
+        _response_text(response),
+    )
 
 
 def build_resource_archive(dataset):

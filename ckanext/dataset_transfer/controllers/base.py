@@ -100,13 +100,26 @@ class BaseController():
                 )
 
             if publish_target == "radar":
+                log.info(
+                    "Dataset transfer RADAR publish selected package_id=%s user=%s",
+                    dataset.get("id"),
+                    getattr(toolkit.g, "user", ""),
+                )
                 try:
                     radar_result = RadarPublisher().publish_dataset(dataset)
                 except RadarConfigError as error:
+                    log.exception(
+                        "Dataset transfer RADAR configuration failed package_id=%s",
+                        dataset.get("id"),
+                    )
                     return BaseController._error_response(
                         "RADAR configuration missing", str(error), 400
                     )
                 except RadarPublishError as error:
+                    log.exception(
+                        "Dataset transfer RADAR publish failed package_id=%s",
+                        dataset.get("id"),
+                    )
                     return BaseController._error_response(
                         "RADAR publish failed", str(error), 502
                     )
@@ -119,6 +132,12 @@ class BaseController():
                     publish_time=_time.now()
                 )
                 dataset_db_object.save()
+                log.info(
+                    "Dataset transfer RADAR publish response package_id=%s radar_dataset_id=%s published_url=%s",
+                    dataset.get("id"),
+                    radar_result.get("published_dataset_id"),
+                    radar_result.get("published_url"),
+                )
                 return BaseController._json_response(radar_result)
 
             if publish_target != "luh":
