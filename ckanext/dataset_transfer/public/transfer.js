@@ -69,6 +69,7 @@ $(document).ready(function(){
         formdata.set('token_exist_box', $("#token_exist_box").prop('checked'));
         formdata.set('terms_of_usage', $("#terms_of_usage").prop('checked'));
         formdata.set('rights_of_use', $("#rights_of_use").prop('checked'));
+        add_csrf_token(formdata);
         let req = new XMLHttpRequest();
         req.timeout = 30 * 60 * 1000;
         console.info("Dataset transfer publish request started", dest_url);
@@ -264,6 +265,19 @@ function check_user_has_api_token_and_show_message(){
 }
 
 
+function add_csrf_token(formdata){
+    let field_name = $('meta[name="csrf_field_name"]').attr('content') || '_csrf_token';
+    let token = $('meta[name="' + field_name + '"]').attr('content');
+    if(token){
+        formdata.set(field_name, token);
+        console.debug("Dataset transfer CSRF token attached", field_name);
+    }
+    else{
+        console.error("Dataset transfer CSRF metadata is missing", field_name);
+    }
+}
+
+
 
 
 function GoToStep2(){
@@ -272,6 +286,7 @@ function GoToStep2(){
     formdata.set('package_id', $('#package_id').val());
     formdata.set('api_token', $("#transfer_api_token_input").val());
     formdata.set('token_exist_box', $("#token_exist_box").prop('checked'));
+    add_csrf_token(formdata);
     let req = new XMLHttpRequest();
     req.onreadystatechange = function() {
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200) {

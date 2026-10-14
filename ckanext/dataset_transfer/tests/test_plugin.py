@@ -1,4 +1,5 @@
 import json
+import re
 from urllib.parse import urlparse
 
 import pytest
@@ -46,6 +47,20 @@ def dataset_transfer_migrated_db(clean_db):
         plugins.load("dataset_transfer")
 
     db._run_migrations("dataset_transfer", None, True)
+
+
+@pytest.fixture
+def csrf_enforced_app(app, with_plugins, monkeypatch):
+    flask_app = app.flask_app
+    csrf = flask_app.extensions["csrf"]
+    blueprint = flask_app.blueprints["dataset_transfer"]
+    monkeypatch.setitem(flask_app.config, "WTF_CSRF_ENABLED", True)
+    monkeypatch.setitem(flask_app.config, "WTF_CSRF_CHECK_DEFAULT", True)
+    hooks = flask_app.before_request_funcs.setdefault(blueprint.name, [])
+    protect = csrf.protect
+    hooks.insert(0, protect)
+    yield app
+    hooks.remove(protect)
 
 
 def _body(response):
@@ -98,6 +113,53 @@ def test_publish_page_renders_for_editor(app):
     assert response.status_code == 200, _body(response)
     assert "Publish the dataset" in _body(response)
     assert 'id="publish_url"' in _body(response)
+
+
+@pytest.mark.ckan_config("SECRET_KEY", "dataset-transfer-test-secret")
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_publish_post_accepts_csrf_token_from_rendered_page(
+    csrf_enforced_app, monkeypatch
+):
+    import ckan.tests.factories as factories
+    from ckanext.dataset_transfer.controllers import base
+
+    user = factories.Sysadmin()
+    dataset = factories.Dataset(user=user)
+    monkeypatch.setattr(
+        base.Helper, "check_access_edit_package", lambda package_id: True
+    )
+    client = csrf_enforced_app.test_client()
+    page = client.get(
+        "/dataset_transfer/publish_page/{}".format(dataset["name"]),
+        extra_environ={"REMOTE_USER": user["name"]},
+    )
+    page_body = page.get_data(as_text=True)
+    token_match = re.search(
+        r'<meta name="_csrf_token" content="([^"]+)"', page_body
+    )
+    assert token_match, page_body
+
+    missing_token = client.post(
+        "/dataset_transfer/publish",
+        data={"package_id": dataset["id"]},
+        extra_environ={"REMOTE_USER": user["name"]},
+    )
+    assert missing_token.status_code == 400
+    assert "CSRF token is missing" in missing_token.get_data(as_text=True)
+
+    response = client.post(
+        "/dataset_transfer/publish",
+        data={
+            "_csrf_token": token_match.group(1),
+            "package_id": dataset["id"],
+            "publish_target": "radar",
+            "terms_of_usage": "false",
+            "rights_of_use": "true",
+        },
+        extra_environ={"REMOTE_USER": user["name"]},
+    )
+    assert response.status_code == 400
+    assert response.json["error"] == "Missing consent"
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")

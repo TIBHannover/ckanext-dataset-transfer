@@ -68,11 +68,23 @@ class BaseController():
         '''
         
         try:
-            log.info("Dataset transfer publish request started")
             package_id = request.form.get("package_id")
-            log.info("Dataset transfer publish request for package_id=%s", package_id)
+            publish_target = request.form.get("publish_target") or "luh"
+            log.info(
+                "Dataset transfer publish request accepted package_id=%s target=%s user=%s content_type=%s remote_addr=%s form_fields=%s",
+                package_id,
+                publish_target,
+                getattr(toolkit.g, "user", ""),
+                request.content_type,
+                request.remote_addr,
+                sorted(key for key in request.form.keys() if key != "api_token"),
+            )
             if(BaseController.is_dataset_published(package_id)):
                 # dataset is already published
+                log.warning(
+                    "Dataset transfer publish rejected package_id=%s reason=already_published",
+                    package_id,
+                )
                 return BaseController._error_response(
                     "Already published",
                     "This dataset is already published",
@@ -80,19 +92,35 @@ class BaseController():
                 )
 
             org_name = Helper.get_organization_id()
-            publish_target = request.form.get("publish_target") or "luh"
             api_token = request.form.get("api_token")
             save_api_token = request.form.get("save_api_token_box")
             terms_of_use_consent = request.form.get("terms_of_usage")
             rights_of_use_consent = request.form.get("rights_of_use")
             use_existing_api_token = request.form.get("token_exist_box")
             dataset = toolkit.get_action('package_show')({}, {'id': package_id})
+            log.info(
+                "Dataset transfer package loaded package_id=%s target=%s resource_count=%s",
+                dataset.get("id"),
+                publish_target,
+                len(dataset.get("resources") or []),
+            )
             if not Helper.check_access_edit_package(dataset['id']):
+                    log.warning(
+                        "Dataset transfer publish rejected package_id=%s reason=not_authorized user=%s",
+                        dataset.get("id"),
+                        getattr(toolkit.g, "user", ""),
+                    )
                     return BaseController._error_response(
                         "Not Authorized", "Not Authorized", 403
                     )
             
             if terms_of_use_consent != "true" or rights_of_use_consent != "true":
+                log.warning(
+                    "Dataset transfer publish rejected package_id=%s reason=missing_consent terms=%s rights=%s",
+                    dataset.get("id"),
+                    terms_of_use_consent,
+                    rights_of_use_consent,
+                )
                 return BaseController._error_response(
                     "Missing consent",
                     "Terms of usage and rights of use must be accepted.",
@@ -361,7 +389,18 @@ class BaseController():
             package_id = request.form.get('package_id')
             api_token = request.form.get('api_token')
             use_existing_token = request.form.get('token_exist_box')
+            log.info(
+                "Dataset transfer organization form request accepted package_id=%s user=%s use_existing_token=%s content_type=%s",
+                package_id,
+                getattr(toolkit.g, "user", ""),
+                use_existing_token,
+                request.content_type,
+            )
             if not Helper.check_access_edit_package(package_id):
+                log.warning(
+                    "Dataset transfer organization form rejected package_id=%s reason=not_authorized",
+                    package_id,
+                )
                 return 'Not Authorized'
             
             if use_existing_token == "true":
@@ -374,6 +413,12 @@ class BaseController():
             header = {"Authorization" : api_token}
             org_list_url = BaseController.base_url +  "organization_list_for_user"
             response= requests.get(org_list_url, headers=header)
+            log.info(
+                "Dataset transfer organization list response package_id=%s status=%s body=%s",
+                package_id,
+                response.status_code,
+                response.text[:1000],
+            )
             if response.status_code != 200:
                 return json.dumps([])
             else:
@@ -387,7 +432,11 @@ class BaseController():
                     count += 1
                 return json.dumps(data)
         
-        except:
+        except Exception:
+            log.exception(
+                "Dataset transfer organization form failed package_id=%s",
+                request.form.get('package_id'),
+            )
             return json.dumps([])
     
 
