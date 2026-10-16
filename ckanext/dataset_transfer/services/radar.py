@@ -90,10 +90,14 @@ class RadarPublisher(object):
         )
 
     def _required(self, key):
-        value = self.config.get(key)
+        value = self._setting(key)
+
         if value:
             return value
-        raise RadarConfigError("Missing CKAN config value: {}".format(key))
+
+        raise RadarConfigError(
+            "Missing RADAR configuration: {}".format(key)
+        )
 
     def _access_token(self):
         configured_token = self.config.get("ckanext.dataset_transfer.radar.access_token")
@@ -473,6 +477,25 @@ class RadarPublisher(object):
         raise RadarPublishError(
             "{}: HTTP {} {}".format(message, response.status_code, _response_text(response))
         )
+
+    def _setting(self, key, default=None):
+        """
+        Read RADAR configuration from CKAN settings or Docker
+        environment variables.
+        """
+        value = self.config.get(key)
+
+        if value is not None and str(value).strip():
+            return value
+
+        env_key = key.upper().replace(".", "_")
+
+        value = os.environ.get(env_key)
+
+        if value is not None and value.strip():
+            return value
+
+        return default
 
 
 def build_radar_metadata_xml(
