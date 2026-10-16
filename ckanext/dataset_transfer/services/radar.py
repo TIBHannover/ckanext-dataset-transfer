@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import zipfile
+from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -114,9 +115,17 @@ class RadarPublisher(object):
         except requests.RequestException as error:
             log.exception("RADAR token request failed url=%s", token_url)
             raise RadarPublishError("RADAR token request failed: {}".format(error))
-        _log_response("RADAR token response", response)
+        # Token response bodies contain credentials and must never be logged.
+        log.info(
+            "RADAR token response status=%s url=%s",
+            getattr(response, "status_code", ""),
+            getattr(response, "url", ""),
+        )
         self._raise_for_radar(response, "RADAR token request failed")
-        token_json = response.json()
+        try:
+            token_json = response.json()
+        except ValueError as error:
+            raise RadarPublishError("RADAR token response was not valid JSON") from error
         if not token_json.get("access_token"):
             raise RadarPublishError("RADAR token response did not contain access_token")
         return token_json["access_token"]
@@ -150,20 +159,30 @@ class RadarPublisher(object):
         validate_radar_metadata_xml(metadata_xml, self.descriptive_xsd_path)
         log.info("RADAR local metadata validation passed package_id=%s", dataset.get("id"))
         self._upload_metadata(dataset_id, metadata_xml, headers)
+
+        # RADAR removes the schema-valid placeholder identifier on upload. It must
+        # assign its DOI before validating the stored descriptive metadata.
+        doi = self._assign_doi(dataset_id, headers)
         self._validate_uploaded_metadata(dataset_id, headers)
 
         archive = build_resource_archive(dataset)
         if archive is not None:
+            with zipfile.ZipFile(archive, "r") as zip_file:
+                archive_entries = [
+                    item.filename for item in zip_file.infolist() if not item.is_dir()
+                ]
             archive.seek(0, os.SEEK_END)
             archive_size = archive.tell()
             archive.seek(0)
             log.info(
-                "RADAR resource archive built package_id=%s dataset_id=%s bytes=%s",
+                "RADAR resource archive built package_id=%s dataset_id=%s bytes=%s entries=%s",
                 dataset.get("id"),
                 dataset_id,
                 archive_size,
+                archive_entries,
             )
             self._upload_archive(dataset_id, archive, headers)
+            self._verify_uploaded_resources(dataset_id, archive_entries, headers)
         else:
             log.info(
                 "RADAR resource archive skipped package_id=%s dataset_id=%s reason=no_resources",
@@ -171,7 +190,6 @@ class RadarPublisher(object):
                 dataset_id,
             )
 
-        doi = self._read_doi(dataset_id, headers)
         published_url = self.dataset_url_template.format(dataset_id=dataset_id)
         log.info(
             "RADAR publish completed package_id=%s dataset_id=%s doi=%s published_url=%s",
@@ -261,6 +279,30 @@ class RadarPublisher(object):
             raise RadarPublishError("RADAR metadata upload failed: {}".format(error))
         _log_response("RADAR metadata upload response", response)
         self._raise_for_radar(response, "RADAR metadata upload failed")
+        log.info("RADAR metadata upload completed dataset_id=%s", dataset_id)
+
+    def _assign_doi(self, dataset_id, headers):
+        url = self.context_url + "/api/datasets/{}/doi".format(dataset_id)
+        log.info("RADAR DOI assignment request dataset_id=%s url=%s", dataset_id, url)
+        try:
+            response = self.requests.post(url, headers=headers, timeout=120)
+        except requests.RequestException as error:
+            log.exception(
+                "RADAR DOI assignment request failed dataset_id=%s url=%s",
+                dataset_id,
+                url,
+            )
+            raise RadarPublishError("RADAR DOI assignment failed: {}".format(error))
+        _log_response("RADAR DOI assignment response", response)
+        self._raise_for_radar(response, "RADAR DOI assignment failed")
+
+        doi = _doi_from_response(response)
+        if not _looks_like_doi(doi):
+            # Some RADAR versions return an empty success body; retrieve the DOI
+            # after the successful assignment rather than inventing one locally.
+            doi = self._read_doi(dataset_id, headers)
+        log.info("RADAR DOI assignment completed dataset_id=%s doi=%s", dataset_id, doi)
+        return doi
 
     def _validate_uploaded_metadata(self, dataset_id, headers):
         url = self.context_url + "/api/datasets/{}/metadata/validate".format(dataset_id)
@@ -274,9 +316,20 @@ class RadarPublisher(object):
         self._raise_for_radar(response, "RADAR metadata validation failed")
         try:
             validation_json = response.json()
-        except ValueError:
-            validation_json = {}
-        if isinstance(validation_json, dict) and validation_json.get("valid") is False:
+        except ValueError as error:
+            raise RadarPublishError(
+                "RADAR metadata validation returned an invalid response"
+            ) from error
+        validation_failed = (
+            not isinstance(validation_json, dict)
+            or validation_json.get("success") is False
+            or validation_json.get("valid") is False
+        )
+        validation_succeeded = isinstance(validation_json, dict) and (
+            validation_json.get("success") is True
+            or validation_json.get("valid") is True
+        )
+        if validation_failed or not validation_succeeded:
             log.error(
                 "RADAR metadata validation failed dataset_id=%s result=%s",
                 dataset_id,
@@ -302,6 +355,95 @@ class RadarPublisher(object):
             raise RadarPublishError("RADAR content ingest failed: {}".format(error))
         _log_response("RADAR ingest upload response", response)
         self._raise_for_radar(response, "RADAR content ingest failed")
+        log.info("RADAR ingest upload completed dataset_id=%s", dataset_id)
+
+    def _verify_uploaded_resources(self, dataset_id, expected_names, headers):
+        url = self.context_url + "/api/datasets/{}/children".format(dataset_id)
+        rows = 100
+        offset = 0
+        children = []
+        total_hits = None
+        log.info(
+            "RADAR resource verification started dataset_id=%s expected_count=%s",
+            dataset_id,
+            len(expected_names),
+        )
+
+        while total_hits is None or offset < total_hits:
+            try:
+                response = self.requests.get(
+                    url,
+                    headers=headers,
+                    params={"offset": offset, "rows": rows},
+                    timeout=120,
+                )
+            except requests.RequestException as error:
+                log.exception(
+                    "RADAR resource verification request failed dataset_id=%s url=%s offset=%s",
+                    dataset_id,
+                    url,
+                    offset,
+                )
+                raise RadarPublishError(
+                    "RADAR resource verification failed: {}".format(error)
+                )
+            _log_response("RADAR children response", response)
+            self._raise_for_radar(response, "RADAR resource verification failed")
+            try:
+                result = response.json()
+            except ValueError as error:
+                raise RadarPublishError(
+                    "RADAR resource verification returned an invalid response"
+                ) from error
+            if not isinstance(result, dict) or not isinstance(result.get("data"), list):
+                raise RadarPublishError(
+                    "RADAR resource verification response did not contain a data list"
+                )
+
+            page = result["data"]
+            children.extend(page)
+            try:
+                total_hits = int(result.get("totalHits", len(children)))
+            except (TypeError, ValueError) as error:
+                raise RadarPublishError(
+                    "RADAR resource verification returned an invalid totalHits value"
+                ) from error
+            offset += len(page)
+            if not page and offset < total_hits:
+                raise RadarPublishError(
+                    "RADAR resource verification pagination ended before all children were returned"
+                )
+
+        actual_names = [
+            child.get("fileName")
+            for child in children
+            if isinstance(child, dict) and child.get("fileName")
+        ]
+        expected = Counter(expected_names)
+        actual = Counter(actual_names)
+        missing = list((expected - actual).elements())
+        if missing or len(actual_names) != len(expected_names):
+            log.error(
+                "RADAR resource verification failed dataset_id=%s expected=%s actual=%s missing=%s",
+                dataset_id,
+                expected_names,
+                actual_names,
+                missing,
+            )
+            raise RadarPublishError(
+                "RADAR resource verification failed: expected {} files, found {}; "
+                "missing archive entries: {}".format(
+                    len(expected_names),
+                    len(actual_names),
+                    ", ".join(missing) or "none",
+                )
+            )
+        log.info(
+            "RADAR resource verification passed dataset_id=%s count=%s files=%s",
+            dataset_id,
+            len(actual_names),
+            actual_names,
+        )
 
     def _read_doi(self, dataset_id, headers):
         url = self.context_url + "/api/datasets/{}/doi".format(dataset_id)
@@ -310,23 +452,13 @@ class RadarPublisher(object):
             response = self.requests.get(url, headers=headers, timeout=120)
         except requests.RequestException as error:
             log.exception("RADAR DOI lookup request failed dataset_id=%s url=%s", dataset_id, url)
-            return ""
+            raise RadarPublishError("RADAR DOI lookup failed: {}".format(error))
         _log_response("RADAR DOI lookup response", response)
-        if response.status_code != 200:
-            log.info(
-                "RADAR DOI lookup skipped dataset_id=%s status=%s body=%s",
-                dataset_id,
-                response.status_code,
-                _response_text(response),
-            )
-            return ""
-        try:
-            doi_json = response.json()
-        except ValueError:
-            return response.text.strip()
-        if isinstance(doi_json, dict):
-            return doi_json.get("doi") or doi_json.get("identifier") or ""
-        return ""
+        self._raise_for_radar(response, "RADAR DOI lookup failed")
+        doi = _doi_from_response(response)
+        if not _looks_like_doi(doi):
+            raise RadarPublishError("RADAR DOI lookup did not return a DOI")
+        return doi
 
     def _raise_for_radar(self, response, message):
         if 200 <= response.status_code < 300:
@@ -466,6 +598,22 @@ def _response_text(response):
     return text[:LOG_BODY_LIMIT]
 
 
+def _doi_from_response(response):
+    try:
+        body = response.json()
+    except ValueError:
+        return (getattr(response, "text", "") or "").strip()
+    if isinstance(body, dict):
+        return str(body.get("doi") or body.get("identifier") or "").strip()
+    if isinstance(body, str):
+        return body.strip()
+    return ""
+
+
+def _looks_like_doi(value):
+    return bool(value and value.startswith("10.") and "/" in value)
+
+
 def _log_response(message, response):
     log.info(
         "%s status=%s url=%s body=%s",
@@ -485,15 +633,27 @@ def build_resource_archive(dataset):
     archive = io.BytesIO()
     wrote_anything = False
     remote_resources = []
+    has_remote_resources = any(
+        resource.get("url_type") != "upload" and resource.get("url")
+        for resource in resources
+    )
+    used_names = {"remote-resources.txt"} if has_remote_resources else set()
 
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for resource in resources:
-            if resource.get("url_type") == "upload" and storage_path:
+            if resource.get("url_type") == "upload":
                 resource_path = _resource_file_path(storage_path, resource.get("id"))
-                if resource_path and os.path.exists(resource_path):
-                    zip_file.write(resource_path, _archive_name(resource))
-                    wrote_anything = True
-                    continue
+                if not resource_path or not os.path.isfile(resource_path):
+                    raise RadarPublishError(
+                        "Uploaded CKAN resource file is missing: resource_id={} filename={}".format(
+                            resource.get("id") or "unknown",
+                            _archive_name(resource),
+                        )
+                    )
+                archive_name = _unique_archive_name(_archive_name(resource), used_names)
+                zip_file.write(resource_path, archive_name)
+                wrote_anything = True
+                continue
             if resource.get("url"):
                 remote_resources.append(
                     "{}\t{}".format(resource.get("name") or resource.get("id"), resource["url"])
@@ -518,12 +678,9 @@ def _element_tag(name):
 
 
 def _metadata_identifier(dataset, identifier_prefix):
-    for field in ("doi", "identifier"):
-        value = dataset.get(field)
-        if value and "/" in value:
-            return value
-    local_id = dataset.get("id") or dataset.get("name") or "ckan-dataset"
-    return "{}/{}".format(identifier_prefix.rstrip("/"), local_id.replace("/", "-"))
+    # The v9.3 XSD requires a DOI-shaped identifier before RADAR has assigned
+    # the real DOI. Keep this explicitly provisional and independent of CKAN IDs.
+    return "{}/radar-pending-assignment".format(identifier_prefix.rstrip("/"))
 
 
 def _production_year(dataset):
@@ -547,7 +704,7 @@ def _language(dataset):
 
 
 def _resource_file_path(storage_path, resource_id):
-    if not resource_id or len(resource_id) < 6:
+    if not storage_path or not resource_id or len(resource_id) < 6:
         return None
     return os.path.join(
         storage_path,
@@ -561,6 +718,17 @@ def _resource_file_path(storage_path, resource_id):
 def _archive_name(resource):
     name = resource.get("name") or resource.get("url") or resource.get("id")
     return os.path.basename(name) or resource.get("id") or "resource"
+
+
+def _unique_archive_name(name, used_names):
+    candidate = name
+    stem, extension = os.path.splitext(name)
+    suffix = 2
+    while candidate in used_names:
+        candidate = "{}-{}{}".format(stem, suffix, extension)
+        suffix += 1
+    used_names.add(candidate)
+    return candidate
 
 
 def _dataset_backlink(dataset):
