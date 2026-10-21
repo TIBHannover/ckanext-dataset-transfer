@@ -591,7 +591,6 @@ def build_radar_metadata_xml(metadata, identifier_prefix=None, **legacy_options)
 
     resource = ET.SubElement(root, _element_tag("resource"), {"resourceType": data["resource_type"]})
     resource.text = data["resource"]
-    _append_geo_locations(root, data["geo_locations"])
     _append_simple_typed_list(root, "dataSources", "dataSource", data["data_sources"], "dataSourceDetail")
     _append_software(root, data["software"])
     _append_text_list(root, "processing", "dataProcessing", data["data_processing"])
@@ -603,7 +602,17 @@ def build_radar_metadata_xml(metadata, identifier_prefix=None, **legacy_options)
 
     rights_holders = ET.SubElement(root, _element_tag("rightsHolders"))
     for holder in data["rights_holders"]:
-        ET.SubElement(rights_holders, _element_tag("rightsHolder")).text = holder
+        attributes = _attributes(
+            holder,
+            (
+                ("name_identifier_scheme", "nameIdentifierScheme"),
+                ("scheme_uri", "schemeURI"),
+                ("name_identifier", "nameIdentifier"),
+            ),
+        )
+        ET.SubElement(
+            rights_holders, _element_tag("rightsHolder"), attributes
+        ).text = holder["name"]
 
     related_information = _container(root, "relatedInformations", data["related_information"])
     if related_information is not None:
@@ -657,22 +666,6 @@ def _append_text_list(root, container_name, element_name, values):
     if container is not None:
         for value in values:
             ET.SubElement(container, _element_tag(element_name)).text = value.get("value") if isinstance(value, dict) else value
-
-
-def _append_geo_locations(root, values):
-    container = _container(root, "geoLocations", values)
-    if container is None:
-        return
-    for item in values:
-        location = ET.SubElement(container, _element_tag("geoLocation"))
-        if item.get("country"):
-            ET.SubElement(location, _element_tag("geoLocationCountry")).text = item["country"]
-        if item.get("region"):
-            ET.SubElement(location, _element_tag("geoLocationRegion")).text = item["region"]
-        if item.get("latitude") not in (None, "") and item.get("longitude") not in (None, ""):
-            point = ET.SubElement(location, _element_tag("geoLocationPoint"))
-            ET.SubElement(point, _element_tag("latitude")).text = str(item["latitude"])
-            ET.SubElement(point, _element_tag("longitude")).text = str(item["longitude"])
 
 
 def _append_software(root, values):

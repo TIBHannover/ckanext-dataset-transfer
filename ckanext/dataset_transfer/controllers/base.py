@@ -76,6 +76,9 @@ class BaseController():
             configured_publisher,
             project_id=project_id,
             dfg_award_number=award_number,
+            related_publications=BaseController._related_publications(
+                package.get("name")
+            ),
         )
         return render_template(
             'publish_page.html',
@@ -535,6 +538,33 @@ class BaseController():
             else:
                 status["legacy"].append(item)
         return status
+
+    @staticmethod
+    def _related_publications(package_name):
+        """Read linked publications when ckanext-Dataset-Reference is enabled."""
+        try:
+            from ckanext.dataset_reference.models.package_reference_link import (
+                PackageReferenceLink,
+            )
+        except ImportError:
+            return []
+
+        try:
+            records = PackageReferenceLink.get_by_package(package_name)
+        except Exception:
+            log.warning(
+                "Dataset reference lookup failed package_name=%s",
+                package_name,
+                exc_info=True,
+            )
+            return []
+        if not isinstance(records, list):
+            return []
+        return [
+            {"doi": record.doi or "", "url": record.url or ""}
+            for record in records
+            if record.doi or record.url
+        ]
     
 
 

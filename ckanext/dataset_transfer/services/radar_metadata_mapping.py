@@ -96,19 +96,6 @@ def _language_vocabulary():
 LANGUAGES = (("", "Not specified"),) + _language_vocabulary()
 
 
-def _xsd_values(type_name):
-    path = Path(__file__).resolve().parent.parent / "schemas" / "radar" / "v9.3" / "RadarTypes.xsd"
-    namespace = {"xs": "http://www.w3.org/2001/XMLSchema"}
-    try:
-        root = ET.parse(str(path)).getroot()
-        simple_type = root.find("xs:simpleType[@name='{}']".format(type_name), namespace)
-        return tuple(item.get("value") for item in simple_type.findall(".//xs:enumeration", namespace))
-    except (AttributeError, ET.ParseError, OSError):
-        return ()
-
-
-COUNTRIES = _xsd_values("ISO3166-Country-Name")
-
 LICENSE_MAP = {
     "cc-by-4.0": "CC BY 4.0 Attribution",
     "cc-by-nd-4.0": "CC BY-ND 4.0 Attribution-NoDerivs",
@@ -135,13 +122,12 @@ VOCABULARIES = {
     "funder_identifier_types": FUNDER_IDENTIFIER_TYPES,
     "name_identifier_schemes": NAME_IDENTIFIER_SCHEMES,
     "languages": LANGUAGES,
-    "countries": COUNTRIES,
 }
 
 LIST_FIELDS = {
     "creators", "contributors", "additional_titles", "descriptions", "keywords",
     "publishers", "subject_areas", "rights_holders", "alternate_identifiers",
-    "related_identifiers", "geo_locations", "data_sources", "software",
+    "related_identifiers", "data_sources", "software",
     "data_processing", "related_information", "funding_references",
 }
 SCALAR_FIELDS = {"title", "production_year", "publication_year", "language", "resource_type", "resource", "rights", "additional_rights", "version"}
@@ -149,7 +135,7 @@ ALLOWED_FIELDS = LIST_FIELDS | SCALAR_FIELDS
 
 
 def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
-                      dfg_award_number=None):
+                      dfg_award_number=None, related_publications=None):
     source = copy.deepcopy(dataset or {})
     organization = source.get("organization") if isinstance(source.get("organization"), dict) else {}
     organization_title = _text(organization.get("title"))
@@ -237,6 +223,41 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
         if default_funding:
             funding_references = [default_funding]
 
+    rights_holders = (
+        _structured_list(source, "rights_holders")
+        or _structured_list(source, "rightsHolder")
+        or _structured_list(source, "rightsHolders")
+    )
+    rights_holders = [_normalize_rights_holder(item) for item in rights_holders]
+    if not rights_holders and organization_title:
+        rights_holders = [_organization_rights_holder(organization)]
+
+    related_identifiers = [
+        _normalize_related_identifier(item)
+        for item in _structured_list(source, "related_identifiers")
+        if isinstance(item, dict)
+    ]
+    existing_related = {
+        (item["value"].lower(), item["identifier_type"], item["relation_type"])
+        for item in related_identifiers if item["value"]
+    }
+    # Publications linked by ckanext-Dataset-Reference cite or reference this
+    # dataset, so RADAR's IsReferencedBy relation describes their direction.
+    for publication in related_publications or []:
+        if not isinstance(publication, dict):
+            continue
+        doi = _text(publication.get("doi"))
+        url = _text(publication.get("url"))
+        item = {
+            "value": doi or url,
+            "identifier_type": "DOI" if doi else "URL",
+            "relation_type": "IsReferencedBy",
+        }
+        key = (item["value"].lower(), item["identifier_type"], item["relation_type"])
+        if item["value"] and key not in existing_related:
+            related_identifiers.append(item)
+            existing_related.add(key)
+
     return {
         "title": _text(source.get("title") or source.get("name")),
         "descriptions": descriptions,
@@ -250,12 +271,12 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
         "resource": _text(source.get("resource_description") or source.get("title") or source.get("name")),
         "rights": rights,
         "additional_rights": "",
-        "rights_holders": [organization_title] if organization_title else [],
+        "rights_holders": rights_holders,
         "keywords": keywords,
         "language": _normalize_language(source.get("language")) or "eng",
         "version": _text(source.get("version")),
-        "additional_titles": [], "alternate_identifiers": [], "related_identifiers": [],
-        "geo_locations": [], "data_sources": [], "software": [], "data_processing": data_processing,
+        "additional_titles": [], "alternate_identifiers": [], "related_identifiers": related_identifiers,
+        "data_sources": [], "software": [], "data_processing": data_processing,
         "related_information": [], "funding_references": funding_references,
     }
 
@@ -276,16 +297,20 @@ def normalize_reviewed_metadata(value):
     normalized["contributors"] = [_normalize_contributor(item, default_type="DataManager") for item in normalized["contributors"] if isinstance(item, dict)]
     # Accept legacy string publishers while normalizing new identifier metadata.
     normalized["publishers"] = [_normalize_publisher(item) for item in normalized["publishers"]]
-    for key in ("rights_holders", "data_processing"):
+    for key in ("data_processing",):
         normalized[key] = [_text(item.get("value") if isinstance(item, dict) else item) for item in normalized[key]]
         normalized[key] = [item for item in normalized[key] if item]
+    # Accept legacy plain-text rights holders while supporting RADAR v9.3
+    # organization/person identifier attributes.
+    normalized["rights_holders"] = [
+        _normalize_rights_holder(item) for item in normalized["rights_holders"]
+    ]
     normalized["subject_areas"] = [_normalize_subject_area(item) for item in normalized["subject_areas"]]
     normalized["additional_titles"] = [_normalize_object(item, ("value", "type")) for item in normalized["additional_titles"] if isinstance(item, dict)]
     normalized["descriptions"] = [_normalize_object(item, ("value", "type")) for item in normalized["descriptions"] if isinstance(item, dict)]
     normalized["keywords"] = [_normalize_object(item, ("value", "scheme", "scheme_uri", "value_uri", "classification_code", "ontology_uri", "ontology_id")) for item in normalized["keywords"] if isinstance(item, dict)]
     normalized["alternate_identifiers"] = [_normalize_object(item, ("value", "type")) for item in normalized["alternate_identifiers"] if isinstance(item, dict)]
-    normalized["related_identifiers"] = [_normalize_object(item, ("value", "identifier_type", "relation_type")) for item in normalized["related_identifiers"] if isinstance(item, dict)]
-    normalized["geo_locations"] = [_normalize_object(item, ("country", "region", "latitude", "longitude")) for item in normalized["geo_locations"] if isinstance(item, dict)]
+    normalized["related_identifiers"] = [_normalize_related_identifier(item) for item in normalized["related_identifiers"] if isinstance(item, dict)]
     normalized["data_sources"] = [_normalize_object(item, ("value", "type")) for item in normalized["data_sources"] if isinstance(item, dict)]
     normalized["software"] = [_normalize_object(item, ("name", "version", "type", "alternative_name", "alternative_version")) for item in normalized["software"] if isinstance(item, dict)]
     normalized["related_information"] = [_normalize_object(item, ("value", "type")) for item in normalized["related_information"] if isinstance(item, dict)]
@@ -335,6 +360,12 @@ def validate_radar_metadata(metadata):
             _error(errors, "publishers.{}.scheme_uri".format(index), "ORCID publishers must use https://orcid.org/ as the scheme URI.")
         if not identifier and (scheme or scheme_uri):
             _error(errors, "publishers.{}.name_identifier".format(index), "Enter a publisher identifier or clear its scheme fields.")
+    for index, holder in enumerate(data["rights_holders"]):
+        if not holder["name"]:
+            _error(errors, "rights_holders.{}.name".format(index), "Please provide the rights holder name.")
+        _validate_organization_identifier(
+            errors, holder, "rights_holders.{}".format(index), "rights holder"
+        )
     for index, area in enumerate(data["subject_areas"]):
         controlled = _text(area.get("controlled") if isinstance(area, dict) else area)
         additional = _text(area.get("additional") if isinstance(area, dict) else "")
@@ -394,18 +425,6 @@ def validate_radar_metadata(metadata):
     for index, item in enumerate(data["software"]):
         if not isinstance(item, dict) or item.get("type") not in SOFTWARE_TYPES or not _text(item.get("name")) or not _text(item.get("version")):
             _error(errors, "software.{}".format(index), "Software requires a purpose, name, and version.")
-    for index, item in enumerate(data["geo_locations"]):
-        if not isinstance(item, dict):
-            _error(errors, "geo_locations.{}".format(index), "Invalid geographic entry.")
-            continue
-        _coordinate(errors, item.get("latitude"), -90, 90, "geo_locations.{}.latitude".format(index))
-        _coordinate(errors, item.get("longitude"), -180, 180, "geo_locations.{}.longitude".format(index))
-        if bool(item.get("latitude")) != bool(item.get("longitude")):
-            _error(errors, "geo_locations.{}".format(index), "Latitude and longitude must be supplied together.")
-        if not any(item.values()):
-            _error(errors, "geo_locations.{}".format(index), "Please complete or remove the empty geographic entry.")
-        if item.get("country") and item["country"] not in COUNTRIES:
-            _error(errors, "geo_locations.{}.country".format(index), "Please select a valid RADAR country.")
     for index, item in enumerate(data["related_information"]):
         if not item["value"]:
             _error(errors, "related_information.{}.value".format(index), "Please provide the related information text.")
@@ -477,6 +496,67 @@ def _normalize_publisher(item):
     }
 
 
+def _normalize_rights_holder(item):
+    if not isinstance(item, dict):
+        return _normalize_publisher(item)
+    return {
+        "name": _text(
+            item.get("name")
+            or item.get("rights_holder_name")
+            or item.get("rightsHolderName")
+            or item.get("value")
+        ),
+        "name_identifier": _text(
+            item.get("name_identifier")
+            or item.get("nameIdentifier")
+            or item.get("identifier")
+        ),
+        "name_identifier_scheme": _text(
+            item.get("name_identifier_scheme")
+            or item.get("nameIdentifierScheme")
+            or item.get("identifier_scheme")
+        ),
+        "scheme_uri": _text(item.get("scheme_uri") or item.get("schemeURI")),
+    }
+
+
+def _normalize_related_identifier(item):
+    return {
+        "value": _text(item.get("value") or item.get("identifier") or item.get("doi") or item.get("url")),
+        "identifier_type": _text(item.get("identifier_type") or item.get("relatedIdentifierType")),
+        "relation_type": _text(item.get("relation_type") or item.get("relationType")),
+    }
+
+
+def _organization_rights_holder(organization):
+    holder = _normalize_rights_holder({
+        "name": organization.get("title"),
+        "name_identifier": organization.get("name_identifier") or organization.get("nameIdentifier"),
+        "name_identifier_scheme": organization.get("name_identifier_scheme") or organization.get("nameIdentifierScheme"),
+        "scheme_uri": organization.get("scheme_uri") or organization.get("schemeURI"),
+    })
+    ror = _text(
+        organization.get("ror")
+        or organization.get("ror_id")
+        or _extra_value(organization, "ror")
+        or _extra_value(organization, "ror_id")
+    )
+    if ror and not holder["name_identifier"]:
+        holder.update({
+            "name_identifier": ror,
+            "name_identifier_scheme": "ROR",
+            "scheme_uri": "https://ror.org/",
+        })
+    return holder
+
+
+def _extra_value(container, key):
+    for extra in container.get("extras") or []:
+        if isinstance(extra, dict) and extra.get("key") == key:
+            return extra.get("value")
+    return ""
+
+
 def _normalize_funding(item):
     return {
         "funder_name": _text(item.get("funder_name") or item.get("funderName")),
@@ -536,6 +616,26 @@ def _valid_ror(value):
     return bool(re.match(r"^(https://ror\.org/)?0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$", value, re.I))
 
 
+def _validate_organization_identifier(errors, item, path, label):
+    identifier = item["name_identifier"]
+    scheme = item["name_identifier_scheme"]
+    scheme_uri = item["scheme_uri"]
+    if identifier and scheme not in NAME_IDENTIFIER_SCHEMES:
+        _error(errors, path + ".name_identifier_scheme", "Please select a valid {} identifier scheme.".format(label))
+    if identifier and not scheme_uri:
+        _error(errors, path + ".scheme_uri", "Please provide the {} identifier scheme URI.".format(label))
+    if scheme == "ROR" and identifier and not _valid_ror(identifier):
+        _error(errors, path + ".name_identifier", "Please provide a valid {} ROR identifier.".format(label))
+    if scheme == "ROR" and identifier and scheme_uri != "https://ror.org/":
+        _error(errors, path + ".scheme_uri", "ROR identifiers must use https://ror.org/ as the scheme URI.")
+    if scheme == "ORCID" and identifier and not _valid_orcid(identifier):
+        _error(errors, path + ".name_identifier", "Please provide a valid {} ORCID.".format(label))
+    if scheme == "ORCID" and identifier and scheme_uri != "https://orcid.org/":
+        _error(errors, path + ".scheme_uri", "ORCID identifiers must use https://orcid.org/ as the scheme URI.")
+    if not identifier and (scheme or scheme_uri):
+        _error(errors, path + ".name_identifier", "Enter an identifier or clear its scheme fields.")
+
+
 def _metadata_created_year(value):
     value = _text(value)
     if not value:
@@ -574,18 +674,6 @@ def project_funding_default(project_id, award_number=None):
         "award_title": title,
         "temporary_award_number": not bool(configured_award),
     }
-
-
-def _coordinate(errors, value, minimum, maximum, field):
-    if value in (None, ""):
-        return
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        _error(errors, field, "Please provide a numeric coordinate.")
-        return
-    if number < minimum or number > maximum:
-        _error(errors, field, "Coordinate must be between {} and {}.".format(minimum, maximum))
 
 
 def _normalize_language(value):

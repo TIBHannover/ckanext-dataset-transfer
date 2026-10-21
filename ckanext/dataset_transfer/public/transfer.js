@@ -244,10 +244,14 @@ $(document).ready(function(){
      $(document).on('change', '.radar-publisher-scheme', function(){
         update_publisher_scheme($(this).closest('.radar-publisher-row'));
      });
+     $(document).on('change', '.radar-rights-holder-scheme', function(){
+        update_rights_holder_scheme($(this).closest('.radar-rights-holder-row'));
+     });
      $(document).on('input', '.radar-award-number', function(){
         $(this).closest('.radar-row').find('.radar-funding-warning').toggle(clean_value($(this).val()) === '12345');
      });
      $('.radar-publisher-row').each(function(){ update_publisher_scheme($(this)); });
+     $('.radar-rights-holder-row').each(function(){ update_rights_holder_scheme($(this)); });
 
 });
 
@@ -294,9 +298,9 @@ function collect_radar_metadata(){
         publication_year: '', subject_areas: [], resource_type: $('#radar_resource_type').val(),
         resource: clean_value($('#radar_resource').val()), rights: $('#radar_rights').val(),
         additional_rights: clean_value($('#radar_additional_rights').val()),
-        rights_holders: collect_text_rows('rights_holders'), keywords: [], language: $('#radar_language').val(),
+        rights_holders: [], keywords: [], language: $('#radar_language').val(),
         version: clean_value($('#radar_version').val()), alternate_identifiers: [], related_identifiers: [],
-        geo_locations: [], data_sources: [], software: [], data_processing: [], related_information: [], funding_references: []
+        data_sources: [], software: [], data_processing: [], related_information: [], funding_references: []
     };
     let description = clean_value($('#radar_description').val());
     if(description){ metadata.descriptions.push({value: description, type: 'Abstract'}); }
@@ -304,6 +308,7 @@ function collect_radar_metadata(){
     $('[data-radar-list="creators"] .radar-person-row').each(function(){ metadata.creators.push(collect_person($(this))); });
     $('[data-radar-list="contributors"] .radar-person-row').each(function(){ let item = collect_person($(this)); item.type = $(this).find('.radar-contributor-type').val(); metadata.contributors.push(item); });
     $('[data-radar-list="publishers"] .radar-publisher-row').each(function(){ let row = $(this); metadata.publishers.push({name: clean_value(row.find('.radar-publisher-name').val()), name_identifier: clean_value(row.find('.radar-publisher-identifier').val()), name_identifier_scheme: row.find('.radar-publisher-scheme').val(), scheme_uri: clean_value(row.find('.radar-publisher-scheme-uri').val())}); });
+    $('[data-radar-list="rights_holders"] .radar-rights-holder-row').each(function(){ let row = $(this); metadata.rights_holders.push({name: clean_value(row.find('.radar-rights-holder-name').val()), name_identifier: clean_value(row.find('.radar-rights-holder-identifier').val()), name_identifier_scheme: row.find('.radar-rights-holder-scheme').val(), scheme_uri: clean_value(row.find('.radar-rights-holder-scheme-uri').val())}); });
     $('[data-radar-list="subject_areas"] .radar-row').each(function(){ metadata.subject_areas.push({controlled: $(this).find('.radar-subject-controlled').val(), additional: clean_value($(this).find('.radar-subject-additional').val())}); });
     $('[data-radar-list="keywords"] .radar-row').each(function(){ let value = clean_value($(this).find('.radar-value').val()); if(value){ metadata.keywords.push({value: value, scheme: $(this).find('.radar-keyword-scheme').val(), scheme_uri: clean_value($(this).find('.radar-scheme-uri').val()), value_uri: clean_value($(this).find('.radar-value-uri').val()), classification_code: clean_value($(this).find('.radar-classification-code').val()), ontology_uri: clean_value($(this).find('.radar-ontology-uri').val()), ontology_id: clean_value($(this).find('.radar-ontology-id').val())}); }});
     collect_object_rows('additional_titles', function(row){ return {value: clean_value(row.find('.radar-value').val()), type: row.find('.radar-type').val()}; }, metadata);
@@ -311,7 +316,6 @@ function collect_radar_metadata(){
     collect_object_rows('related_identifiers', function(row){ return {value: clean_value(row.find('.radar-value').val()), identifier_type: row.find('.radar-identifier-type').val(), relation_type: row.find('.radar-relation-type').val()}; }, metadata);
     collect_object_rows('data_sources', function(row){ return {value: clean_value(row.find('.radar-value').val()), type: row.find('.radar-type').val()}; }, metadata);
     collect_object_rows('software', function(row){ return {name: clean_value(row.find('.radar-name').val()), version: clean_value(row.find('.radar-version').val()), type: row.find('.radar-type').val(), alternative_name: clean_value(row.find('.radar-alternative-name').val()), alternative_version: clean_value(row.find('.radar-alternative-version').val())}; }, metadata, 'name');
-    collect_object_rows('geo_locations', function(row){ let item = {country: clean_value(row.find('.radar-country').val()), region: clean_value(row.find('.radar-region').val()), latitude: clean_value(row.find('.radar-latitude').val()), longitude: clean_value(row.find('.radar-longitude').val())}; item.value = item.country + item.region + item.latitude + item.longitude; return item; }, metadata);
     collect_object_rows('related_information', function(row){ return {value: clean_value(row.find('.radar-value').val()), type: clean_value(row.find('.radar-type').val())}; }, metadata);
     collect_object_rows('funding_references', function(row){ return {funder_name: clean_value(row.find('.radar-funder-name').val()), funder_identifier: clean_value(row.find('.radar-funder-identifier').val()), funder_identifier_type: row.find('.radar-funder-type').val(), funder_scheme_uri: clean_value(row.find('.radar-scheme-uri').val()), award_number: clean_value(row.find('.radar-award-number').val()), award_uri: clean_value(row.find('.radar-award-uri').val()), award_title: clean_value(row.find('.radar-award-title').val())}; }, metadata, 'funder_name');
     metadata.data_processing = collect_text_rows('data_processing');
@@ -354,7 +358,7 @@ function render_radar_confirmation(metadata){
         ['Resource Type', metadata.resource_type],
         ['Licence', metadata.rights],
         ['Publishers', $.map(metadata.publishers, function(item){ return item.name; }).join('; ')],
-        ['Rights Holders', metadata.rights_holders.join('; ')]
+        ['Rights Holders', $.map(metadata.rights_holders, function(item){ return item.name; }).join('; ')]
     ];
     $.each(rows, function(_, row){ body.append($('<tr></tr>').append($('<th></th>').text(row[0])).append($('<td></td>').text(row[1]))); });
 }
@@ -383,6 +387,7 @@ function add_radar_row(container, template){
     let html = '';
     if(template === 'text'){ html = '<div class="radar-row input-group"><input class="form-control radar-value"><span class="input-group-btn"><button type="button" class="btn btn-danger radar-remove">&times;</button></span></div>'; }
     else if(template === 'publisher'){ html = '<div class="radar-row radar-publisher-row"><div class="row"><div class="col-md-5"><label>Publisher Name *</label><input class="form-control radar-publisher-name"></div><div class="col-md-5"><label>Publisher Identifier</label><input class="form-control radar-publisher-identifier"></div>' + remove + '</div><div class="row"><div class="col-md-5"><label>Identifier Scheme</label><select class="form-control radar-publisher-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div><div class="col-md-5"><label>Scheme URI</label><input class="form-control radar-publisher-scheme-uri" readonly></div></div></div>'; }
+    else if(template === 'rights-holder'){ html = '<div class="radar-row radar-rights-holder-row"><div class="row"><div class="col-md-5"><label>Rights Holder Name *</label><input class="form-control radar-rights-holder-name"></div><div class="col-md-5"><label>Name Identifier</label><input class="form-control radar-rights-holder-identifier"></div>' + remove + '</div><div class="row"><div class="col-md-5"><label>Identifier Scheme</label><select class="form-control radar-rights-holder-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div><div class="col-md-5"><label>Scheme URI</label><input class="form-control radar-rights-holder-scheme-uri" readonly></div></div></div>'; }
     else if(template === 'textarea'){ html = '<div class="radar-row"><textarea class="form-control radar-value" rows="3"></textarea><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>'; }
     else if(template === 'creator' || template === 'contributor'){
         let role = template === 'contributor' ? '<div class="col-md-3"><select class="form-control radar-contributor-type">' + $('#radar-template-options').html() + '</select></div>' : '';
@@ -396,15 +401,27 @@ function add_radar_row(container, template){
     else if(template === 'related-identifier'){ html = '<div class="radar-row row"><div class="col-md-4"><input class="form-control radar-value" placeholder="Identifier"></div><div class="col-md-3"><select class="form-control radar-identifier-type">' + $('#radar-template-related-id-options').html() + '</select></div><div class="col-md-4"><select class="form-control radar-relation-type">' + $('#radar-template-relation-options').html() + '</select></div>' + remove + '</div>'; }
     else if(template === 'data-source'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Source description"></div><div class="col-md-4"><select class="form-control radar-type">' + $('#radar-template-data-source-options').html() + '</select></div>' + remove + '</div>'; }
     else if(template === 'software'){ html = '<div class="radar-row row"><div class="col-md-3"><input class="form-control radar-name" placeholder="Software name"></div><div class="col-md-2"><input class="form-control radar-version" placeholder="Version"></div><div class="col-md-3"><select class="form-control radar-type">' + $('#radar-template-software-options').html() + '</select></div><div class="col-md-3"><input class="form-control radar-alternative-name" placeholder="Alternative name"></div>' + remove + '</div>'; }
-    else if(template === 'geo'){ html = '<div class="radar-row row"><div class="col-md-3"><select class="form-control radar-country"><option value="">Country</option>' + $('#radar-template-country-options').html() + '</select></div><div class="col-md-3"><input class="form-control radar-region" placeholder="Region"></div><div class="col-md-2"><input class="form-control radar-latitude" placeholder="Latitude"></div><div class="col-md-2"><input class="form-control radar-longitude" placeholder="Longitude"></div>' + remove + '</div>'; }
     else if(template === 'related-information'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Information"></div><div class="col-md-4"><input class="form-control radar-type" placeholder="Information type"></div>' + remove + '</div>'; }
     else if(template === 'funding'){ html = '<div class="radar-row"><div class="row"><div class="col-md-4"><input class="form-control radar-funder-name" placeholder="Funder name"></div><div class="col-md-3"><input class="form-control radar-funder-identifier" placeholder="Funder identifier"></div><div class="col-md-2"><select class="form-control radar-funder-type">' + $('#radar-template-funder-options').html() + '</select></div><div class="col-md-2"><input class="form-control radar-scheme-uri" placeholder="Scheme URI"></div>' + remove + '</div><div class="row"><div class="col-md-4"><input class="form-control radar-award-number" placeholder="Award number"></div><div class="col-md-4"><input class="form-control radar-award-uri" placeholder="Award URI"></div><div class="col-md-4"><input class="form-control radar-award-title" placeholder="Award title"></div></div></div>'; }
     container.find('.radar-rows').first().append(html);
 }
 
 function update_publisher_scheme(row){
-    let scheme = row.find('.radar-publisher-scheme').val();
-    let uri = row.find('.radar-publisher-scheme-uri');
+    update_name_identifier_scheme(
+        row.find('.radar-publisher-scheme'),
+        row.find('.radar-publisher-scheme-uri')
+    );
+}
+
+function update_rights_holder_scheme(row){
+    update_name_identifier_scheme(
+        row.find('.radar-rights-holder-scheme'),
+        row.find('.radar-rights-holder-scheme-uri')
+    );
+}
+
+function update_name_identifier_scheme(schemeInput, uri){
+    let scheme = schemeInput.val();
     if(scheme === 'ROR'){
         uri.val('https://ror.org/').prop('readonly', true);
     }
