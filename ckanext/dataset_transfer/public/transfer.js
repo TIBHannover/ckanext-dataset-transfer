@@ -323,7 +323,7 @@ function collect_radar_metadata(){
 }
 
 function collect_person(row){
-    return {name: clean_value(row.find('.radar-name').val()), given_name: clean_value(row.find('.radar-given-name').val()), family_name: clean_value(row.find('.radar-family-name').val()), orcid: clean_value(row.find('.radar-orcid').val()), affiliation: clean_value(row.find('.radar-affiliation').val()), affiliation_ror: clean_value(row.find('.radar-affiliation-ror').val())};
+    return {creator_type: row.find('.radar-creator-type').val() || '', name: clean_value(row.find('.radar-name').val()), given_name: clean_value(row.find('.radar-given-name').val()), family_name: clean_value(row.find('.radar-family-name').val()), orcid: clean_value(row.find('.radar-orcid').val()), affiliation: clean_value(row.find('.radar-affiliation').val()), affiliation_ror: clean_value(row.find('.radar-affiliation-ror').val())};
 }
 
 function collect_text_rows(name){
@@ -342,8 +342,8 @@ function validate_radar_metadata_in_browser(metadata){
     if(!metadata.creators.length){ errors.push({field: 'creators', message: 'Please add at least one creator.'}); }
     $.each(metadata.creators, function(index, creator){
         let personName = creator.name || creator.given_name || creator.family_name;
-        if(!personName){ errors.push({field: 'creators.' + index + '.name', message: 'Please provide the creator\'s personal name.'}); }
-        if(!creator.affiliation){ errors.push({field: 'creators.' + index + '.affiliation', message: 'Please provide the creator\'s affiliation or institute.'}); }
+        if(['person', 'institution'].indexOf(creator.creator_type) === -1){ errors.push({field: 'creators.' + index + '.creator_type', message: 'Please select whether the creator is a person or institution.'}); }
+        if(!personName){ errors.push({field: 'creators.' + index + '.name', message: 'Please provide the creator name.'}); }
     });
     if(!metadata.production_year){ errors.push({field: 'production_year', message: 'Please provide the production year.'}); }
     if(!metadata.subject_areas.length){ errors.push({field: 'subject_areas', message: 'Please select a scientific subject area.'}); }
@@ -436,11 +436,15 @@ function format_radar_items(items, formatter){
 
 function format_radar_person(item){
     let name = item.name || [item.family_name, item.given_name].filter(Boolean).join(', ');
-    return format_radar_details(name, [
+    let details = [
         ['Given Name', item.given_name], ['Family Name', item.family_name],
         ['ORCID', item.orcid], ['Affiliation', item.affiliation],
         ['Affiliation ROR', item.affiliation_ror]
-    ]);
+    ];
+    if(item.creator_type){
+        details.unshift(['Creator Type', item.creator_type === 'institution' ? 'Institution' : 'Person and affiliation']);
+    }
+    return format_radar_details(name, details);
 }
 
 function format_radar_organization(item){
@@ -488,9 +492,8 @@ function add_radar_row(container, template){
     else if(template === 'textarea'){ html = '<div class="radar-row"><textarea class="form-control radar-value" rows="3"></textarea><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>'; }
     else if(template === 'creator' || template === 'contributor'){
         let role = template === 'contributor' ? '<div class="col-md-3"><select class="form-control radar-contributor-type">' + $('#radar-template-options').html() + '</select></div>' : '';
-        let namePlaceholder = template === 'creator' ? 'Person / Complete Name *' : 'Complete name';
-        let affiliationPlaceholder = template === 'creator' ? 'Affiliation / Institute *' : 'Affiliation';
-        html = '<div class="radar-row radar-person-row"><div class="row"><div class="col-md-4"><input class="form-control radar-name" placeholder="' + namePlaceholder + '"></div><div class="col-md-3"><input class="form-control radar-given-name" placeholder="Given name"></div><div class="col-md-3"><input class="form-control radar-family-name" placeholder="Family name"></div>' + remove + '</div><div class="row"><div class="col-md-3"><input class="form-control radar-orcid" placeholder="ORCID"></div><div class="col-md-3"><input class="form-control radar-affiliation" placeholder="' + affiliationPlaceholder + '"></div><div class="col-md-3"><input class="form-control radar-affiliation-ror" placeholder="Affiliation ROR"></div>' + role + '</div></div>';
+        let creatorType = template === 'creator' ? '<div class="col-md-3"><select class="form-control radar-creator-type"><option value="person" selected>Person and affiliation</option><option value="institution">Institution</option></select></div>' : '';
+        html = '<div class="radar-row radar-person-row"><div class="row">' + creatorType + '<div class="col-md-3"><input class="form-control radar-name" placeholder="Creator name *"></div><div class="col-md-3"><input class="form-control radar-given-name" placeholder="Given name"></div><div class="col-md-2"><input class="form-control radar-family-name" placeholder="Family name"></div>' + remove + '</div><div class="row"><div class="col-md-3"><input class="form-control radar-orcid" placeholder="ORCID"></div><div class="col-md-3"><input class="form-control radar-affiliation" placeholder="Affiliation"></div><div class="col-md-3"><input class="form-control radar-affiliation-ror" placeholder="Affiliation ROR"></div>' + role + '</div></div>';
     }
     else if(template === 'subject-area'){ html = '<div class="radar-row row"><div class="col-md-5"><select class="form-control radar-subject-controlled">' + $('#radar-template-subject-options').html() + '</select></div><div class="col-md-6"><input class="form-control radar-subject-additional" placeholder="Specify when Other"></div>' + remove + '</div>'; }
     else if(template === 'keyword'){ html = '<div class="radar-row row"><div class="col-md-4"><input class="form-control radar-value" placeholder="Keyword"></div><div class="col-md-2"><select class="form-control radar-keyword-scheme"><option>Other</option><option>GND</option></select></div><div class="col-md-2"><input class="form-control radar-value-uri" placeholder="Value URI"></div><div class="col-md-2"><input class="form-control radar-ontology-id" placeholder="Ontology ID"></div>' + remove + '</div>'; }
