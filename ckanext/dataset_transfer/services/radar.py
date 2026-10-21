@@ -634,9 +634,11 @@ def _container(root, name, values):
 def _append_person(node, item, prefix):
     name = item.get("name") or ", ".join(part for part in (item.get("family_name"), item.get("given_name")) if part)
     ET.SubElement(node, _element_tag(prefix + "Name")).text = name
-    if item.get("given_name"):
+    # RADAR v9.3 has no creatorType attribute. The review-only type controls
+    # whether person-specific name parts are emitted.
+    if item.get("creator_type") != "institution" and item.get("given_name"):
         ET.SubElement(node, _element_tag("givenName")).text = item["given_name"]
-    if item.get("family_name"):
+    if item.get("creator_type") != "institution" and item.get("family_name"):
         ET.SubElement(node, _element_tag("familyName")).text = item["family_name"]
     if item.get("orcid"):
         ET.SubElement(node, _element_tag("nameIdentifier"), {"nameIdentifierScheme": "ORCID", "schemeURI": "https://orcid.org/"}).text = item["orcid"]

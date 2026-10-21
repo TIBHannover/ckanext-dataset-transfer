@@ -57,20 +57,21 @@
     <legend>{{ _('Creators and Contributors') }}</legend>
     <div class="radar-repeatable radar-required" data-radar-list="creators" data-radar-field="creators">
       <label>{{ _('Creators') }} <span class="required">*</span></label>
-      <p class="help-block">{{ _('Each creator must be a person and must include an affiliation or institute. The CKAN organization is pre-filled as a candidate affiliation; please confirm or correct it.') }}</p>
+      <p class="help-block">{{ _('Native CKAN authors are imported as people without splitting their names. Add an affiliation only when it is known.') }}</p>
       <div class="radar-rows">
         {% for creator in radar_metadata.creators %}
           <div class="radar-row radar-person-row">
             <div class="row">
-              <div class="col-md-4 form-group"><label>{{ _('Person / Complete Name') }} *</label><input class="form-control radar-name" value="{{ creator.name }}"></div>
-              <div class="col-md-4 form-group"><label>{{ _('Given Name') }}</label><input class="form-control radar-given-name" value="{{ creator.given_name }}"></div>
-              <div class="col-md-4 form-group"><label>{{ _('Family Name') }}</label><input class="form-control radar-family-name" value="{{ creator.family_name }}"></div>
+              <div class="col-md-3 form-group"><label>{{ _('Creator Type') }} *</label><select class="form-control radar-creator-type"><option value="person"{% if creator.creator_type != 'institution' %} selected{% endif %}>{{ _('Person and affiliation') }}</option><option value="institution"{% if creator.creator_type == 'institution' %} selected{% endif %}>{{ _('Institution') }}</option></select></div>
+              <div class="col-md-3 form-group"><label>{{ _('Creator Name') }} *</label><input class="form-control radar-name" value="{{ creator.name }}"></div>
+              <div class="col-md-3 form-group"><label>{{ _('Given Name') }}</label><input class="form-control radar-given-name" value="{{ creator.given_name }}"></div>
+              <div class="col-md-2 form-group"><label>{{ _('Family Name') }}</label><input class="form-control radar-family-name" value="{{ creator.family_name }}"></div>
+              <div class="col-md-1"><button type="button" class="btn btn-danger btn-sm radar-remove" title="{{ _('Remove') }}">&times;</button></div>
             </div>
             <div class="row">
               <div class="col-md-4 form-group"><label>{{ _('ORCID') }}</label><input class="form-control radar-orcid" value="{{ creator.orcid }}" placeholder="0000-0000-0000-0000"></div>
-              <div class="col-md-4 form-group"><label>{{ _('Affiliation / Institute') }} *</label><input class="form-control radar-affiliation" value="{{ creator.affiliation }}"></div>
+              <div class="col-md-4 form-group"><label>{{ _('Affiliation') }}</label><input class="form-control radar-affiliation" value="{{ creator.affiliation }}"></div>
               <div class="col-md-3 form-group"><label>{{ _('Affiliation ROR') }}</label><input class="form-control radar-affiliation-ror" value="{{ creator.affiliation_ror }}" placeholder="https://ror.org/..."></div>
-              <div class="col-md-1"><button type="button" class="btn btn-danger btn-sm radar-remove" title="{{ _('Remove') }}">&times;</button></div>
             </div>
           </div>
         {% endfor %}

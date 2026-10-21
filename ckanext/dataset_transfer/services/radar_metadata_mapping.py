@@ -42,6 +42,7 @@ CONTRIBUTOR_TYPES = (
     "RegistrationAgency", "RegistrationAuthority", "RelatedPerson", "Researcher",
     "ResearchGroup", "Sponsor", "Supervisor", "Translator", "WorkPackageLeader", "Other",
 )
+CREATOR_TYPES = ("person", "institution")
 ADDITIONAL_TITLE_TYPES = ("Subtitle", "TranslatedTitle", "AlternativeTitle", "Other")
 DESCRIPTION_TYPES = (
     "Abstract", "Object", "Method", "TableOfContents", "TechnicalInfo",
@@ -113,6 +114,7 @@ VOCABULARIES = {
     "resource_types": RESOURCE_TYPES,
     "rights": RIGHTS,
     "contributor_types": CONTRIBUTOR_TYPES,
+    "creator_types": CREATOR_TYPES,
     "additional_title_types": ADDITIONAL_TITLE_TYPES,
     "description_types": DESCRIPTION_TYPES,
     "related_identifier_types": RELATED_IDENTIFIER_TYPES,
@@ -149,23 +151,14 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
     if creators:
         creators = [_normalize_person(item) for item in creators if isinstance(item, dict)]
     elif _text(source.get("author")):
-        creators = [{"name": _text(source.get("author")), "given_name": "", "family_name": "", "orcid": "", "affiliation": organization_title, "affiliation_ror": ""}]
-
-    # CKAN's author is the person; the owning organization is only a candidate
-    # affiliation and remains editable in the RADAR review form.
-    organization_identity = (
-        _organization_rights_holder(organization) if organization_title else {}
-    )
-    organization_ror = (
-        organization_identity.get("name_identifier", "")
-        if organization_identity.get("name_identifier_scheme") == "ROR"
-        else ""
-    )
-    for creator in creators:
-        if not creator.get("affiliation"):
-            creator["affiliation"] = organization_title
-        if creator.get("affiliation") == organization_title and not creator.get("affiliation_ror"):
-            creator["affiliation_ror"] = organization_ror
+        author = _text(source.get("author"))
+        # A native CKAN author string identifies a person. Keep the complete
+        # value intact; do not guess where the given/family-name boundary lies.
+        creators = [{
+            "creator_type": "person", "name": author,
+            "given_name": author, "family_name": "", "orcid": "",
+            "affiliation": "", "affiliation_ror": "",
+        }]
 
     contributors = _structured_list(source, "contributors")
     contributors = [
@@ -409,10 +402,10 @@ def validate_radar_metadata(metadata):
         if not item["value"] or not item["type"]:
             _error(errors, "alternate_identifiers.{}".format(index), "Each alternate identifier needs a value and type.")
     for index, creator in enumerate(data["creators"]):
+        if creator.get("creator_type") not in CREATOR_TYPES:
+            _error(errors, "creators.{}.creator_type".format(index), "Please select whether the creator is a person or institution.")
         if not _person_name(creator):
-            _error(errors, "creators.{}.name".format(index), "Please provide the creator's personal name.")
-        if not _text(creator.get("affiliation")):
-            _error(errors, "creators.{}.affiliation".format(index), "Please provide the creator's affiliation or institute.")
+            _error(errors, "creators.{}.name".format(index), "Please provide the creator name.")
         _validate_person_identifiers(errors, warnings, creator, "creators.{}".format(index))
     for index, contributor in enumerate(data["contributors"]):
         if not _person_name(contributor):
@@ -484,12 +477,23 @@ def _normalize_person(item):
     given = _text(item.get("given_name") or item.get("givenName"))
     family = _text(item.get("family_name") or item.get("familyName"))
     return {
+        "creator_type": _normalize_creator_type(
+            item.get("creator_type") or item.get("creatorType")
+            or item.get("person_type") or item.get("type")
+        ),
         "name": _text(item.get("name") or item.get("creator_name") or item.get("creatorName")) or _person_name({"given_name": given, "family_name": family}),
         "given_name": given, "family_name": family,
         "orcid": _text(item.get("orcid") or item.get("name_identifier")),
         "affiliation": _text(item.get("affiliation")),
         "affiliation_ror": _text(item.get("affiliation_ror") or item.get("ror")),
     }
+
+
+def _normalize_creator_type(value):
+    normalized = re.sub(r"[^a-z]", "", _text(value).lower())
+    if normalized in ("institution", "organization", "organisation", "organizational"):
+        return "institution"
+    return "person"
 
 
 def _normalize_contributor(item, default_type=""):
