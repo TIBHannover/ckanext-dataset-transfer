@@ -7,6 +7,7 @@
     <input type="hidden" id="publish_url" value="{{ h.url_for('dataset_transfer.publish', _external=True) }}">
     <input type="hidden" id="check_api_token" value="{{ h.url_for('dataset_transfer.user_has_api_token', _external=True) }}">
     <input type="hidden" id="package_id" value="{{ pkg_dict.id }}">
+    <div id="publish_destination_selection">
     <div class="row">
         <h2 class="modal-title">
             {{ _('Publish the dataset') }}
@@ -30,12 +31,19 @@
         <div class="col-sm-12">
             <label for="publish_target">{{ _('Publish target') }}</label>
             <select class="form-control" id="publish_target" name="publish_target">
-                <option value="luh">{{ _('LUH data repository') }}</option>
-                <option value="radar">{{ _('RADAR') }}</option>
+                <option value="luh"{% if transfer_status.luh %} disabled{% endif %}>{{ _('LUH data repository') }}{% if transfer_status.luh %} — {{ _('Already transferred') }}{% endif %}</option>
+                <option value="radar"{% if transfer_status.radar %} disabled{% endif %}>{{ _('RADAR') }}{% if transfer_status.radar %} — {{ _('Already transferred') }}{% endif %}</option>
             </select>
+            {% if transfer_status.luh and transfer_status.radar %}
+              <p class="help-block">{{ _('This dataset has already been transferred to both configured repositories.') }}</p>
+            {% endif %}
+            {% if transfer_status.luh and transfer_status.luh.published_url %}<p class="help-block">LUH: <a href="{{ transfer_status.luh.published_url }}" target="_blank" rel="noopener">{{ _('View existing transfer') }}</a></p>{% endif %}
+            {% if transfer_status.radar and transfer_status.radar.published_url %}<p class="help-block">RADAR: <a href="{{ transfer_status.radar.published_url }}" target="_blank" rel="noopener">{{ _('View existing transfer') }}</a></p>{% endif %}
+            {% if transfer_status.legacy %}<p class="help-block text-warning">{{ _('A legacy transfer record exists without destination information. Verify its destination before starting another transfer.') }}</p>{% endif %}
         </div>
     </div>
     <br>
+    </div>
     {% snippet "snippets/dataset_publish_section1.html", macro=macro %}
     {% snippet "snippets/radar_metadata_review.html", radar_metadata=radar_metadata, radar_vocabularies=radar_vocabularies %}
     {% snippet "snippets/dataset_publish_section2.html" %}

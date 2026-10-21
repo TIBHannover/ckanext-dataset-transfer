@@ -3,6 +3,7 @@
 import copy
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -64,6 +65,12 @@ RELATION_TYPES = (
 DATA_SOURCE_TYPES = ("Instrument", "Media", "Observation", "Survey", "Trial", "Organism", "Tissue", "Other")
 SOFTWARE_TYPES = ("Resource Production", "Resource Processing", "Resource Viewing", "Other")
 FUNDER_IDENTIFIER_TYPES = ("CrossRefFunder", "GRID", "ISNI", "ROR", "Other")
+NAME_IDENTIFIER_SCHEMES = ("Other", "ORCID", "ROR")
+PROJECT_FUNDING_DEFAULTS = {
+    "SFB1153": "Process chain for the production of hybrid high-performance components through tailored forming",
+    "SFB1368": "oxygen-free production",
+    "TRR375": "Multifunctional High-Performance Components made of hybrid porous materials",
+}
 def _language_vocabulary():
     path = Path(__file__).resolve().parent.parent / "schemas" / "radar" / "v9.3" / "RadarTypes.xsd"
     namespace = {"xs": "http://www.w3.org/2001/XMLSchema", "dc": "http://purl.org/dc/elements/1.1/"}
@@ -126,6 +133,7 @@ VOCABULARIES = {
     "data_source_types": DATA_SOURCE_TYPES,
     "software_types": SOFTWARE_TYPES,
     "funder_identifier_types": FUNDER_IDENTIFIER_TYPES,
+    "name_identifier_schemes": NAME_IDENTIFIER_SCHEMES,
     "languages": LANGUAGES,
     "countries": COUNTRIES,
 }
@@ -140,22 +148,32 @@ SCALAR_FIELDS = {"title", "production_year", "publication_year", "language", "re
 ALLOWED_FIELDS = LIST_FIELDS | SCALAR_FIELDS
 
 
-def map_ckan_to_radar(dataset, configured_publisher=None):
+def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
+                      dfg_award_number=None):
     source = copy.deepcopy(dataset or {})
     organization = source.get("organization") if isinstance(source.get("organization"), dict) else {}
     organization_title = _text(organization.get("title"))
-    publisher = _text(configured_publisher) or organization_title
+    publishers = _structured_list(source, "publishers") or _structured_list(source, "publisher")
+    if publishers:
+        publishers = [_normalize_publisher(item) for item in publishers]
+    else:
+        publisher_name = _text(configured_publisher) or organization_title
+        publishers = [_normalize_publisher(publisher_name)] if publisher_name else []
     creators = _structured_list(source, "creators")
     if creators:
         creators = [_normalize_person(item) for item in creators if isinstance(item, dict)]
     elif _text(source.get("author")):
         creators = [{"name": _text(source.get("author")), "given_name": "", "family_name": "", "orcid": "", "affiliation": "", "affiliation_ror": ""}]
 
-    contributors = []
-    if _text(source.get("maintainer")):
+    contributors = _structured_list(source, "contributors")
+    contributors = [
+        _normalize_contributor(item, default_type="DataManager")
+        for item in contributors if isinstance(item, dict)
+    ]
+    if not contributors and _text(source.get("maintainer")):
         contributors.append({
             "name": _text(source.get("maintainer")), "given_name": "", "family_name": "",
-            "orcid": "", "affiliation": "", "affiliation_ror": "", "type": "ContactPerson",
+            "orcid": "", "affiliation": "", "affiliation_ror": "", "type": "DataManager",
         })
     subject_areas = _structured_list(source, "subject_area") or _structured_list(source, "subject_areas")
     subject_areas = [_text(item.get("value") if isinstance(item, dict) else item) for item in subject_areas]
@@ -199,13 +217,33 @@ def map_ckan_to_radar(dataset, configured_publisher=None):
         if technical:
             descriptions.append({"value": "; ".join(technical), "type": "TechnicalInfo"})
 
+    # CKAN creation time is only a review-form suggestion; an explicit research
+    # production year always wins and the submitted review value remains editable.
+    explicit_production_year = _text(_structured_value(source, "production_year"))
+    production_year = explicit_production_year or _metadata_created_year(
+        source.get("metadata_created")
+    )
+    funding_references = (
+        _structured_list(source, "funding_references")
+        or _structured_list(source, "fundingReference")
+        or _structured_list(source, "fundingReferences")
+        or _structured_list(source, "funding")
+    )
+    funding_references = [
+        _normalize_funding(item) for item in funding_references if isinstance(item, dict)
+    ]
+    if not funding_references:
+        default_funding = project_funding_default(project_id, dfg_award_number)
+        if default_funding:
+            funding_references = [default_funding]
+
     return {
         "title": _text(source.get("title") or source.get("name")),
         "descriptions": descriptions,
         "creators": creators,
         "contributors": contributors,
-        "publishers": [publisher] if publisher else [],
-        "production_year": _text(source.get("production_year")),
+        "publishers": publishers,
+        "production_year": production_year,
         "publication_year": "",
         "subject_areas": subject_areas,
         "resource_type": resource_type,
@@ -214,11 +252,11 @@ def map_ckan_to_radar(dataset, configured_publisher=None):
         "additional_rights": "",
         "rights_holders": [organization_title] if organization_title else [],
         "keywords": keywords,
-        "language": _normalize_language(source.get("language")),
+        "language": _normalize_language(source.get("language")) or "eng",
         "version": _text(source.get("version")),
         "additional_titles": [], "alternate_identifiers": [], "related_identifiers": [],
         "geo_locations": [], "data_sources": [], "software": [], "data_processing": data_processing,
-        "related_information": [], "funding_references": [],
+        "related_information": [], "funding_references": funding_references,
     }
 
 
@@ -235,8 +273,10 @@ def normalize_reviewed_metadata(value):
     for key in LIST_FIELDS:
         normalized[key] = normalized.get(key) if isinstance(normalized.get(key), list) else []
     normalized["creators"] = [_normalize_person(item) for item in normalized["creators"] if isinstance(item, dict)]
-    normalized["contributors"] = [_normalize_contributor(item) for item in normalized["contributors"] if isinstance(item, dict)]
-    for key in ("publishers", "rights_holders", "data_processing"):
+    normalized["contributors"] = [_normalize_contributor(item, default_type="DataManager") for item in normalized["contributors"] if isinstance(item, dict)]
+    # Accept legacy string publishers while normalizing new identifier metadata.
+    normalized["publishers"] = [_normalize_publisher(item) for item in normalized["publishers"]]
+    for key in ("rights_holders", "data_processing"):
         normalized[key] = [_text(item.get("value") if isinstance(item, dict) else item) for item in normalized[key]]
         normalized[key] = [item for item in normalized[key] if item]
     normalized["subject_areas"] = [_normalize_subject_area(item) for item in normalized["subject_areas"]]
@@ -249,7 +289,7 @@ def normalize_reviewed_metadata(value):
     normalized["data_sources"] = [_normalize_object(item, ("value", "type")) for item in normalized["data_sources"] if isinstance(item, dict)]
     normalized["software"] = [_normalize_object(item, ("name", "version", "type", "alternative_name", "alternative_version")) for item in normalized["software"] if isinstance(item, dict)]
     normalized["related_information"] = [_normalize_object(item, ("value", "type")) for item in normalized["related_information"] if isinstance(item, dict)]
-    normalized["funding_references"] = [_normalize_object(item, ("funder_name", "funder_identifier", "funder_identifier_type", "funder_scheme_uri", "award_number", "award_uri", "award_title")) for item in normalized["funding_references"] if isinstance(item, dict)]
+    normalized["funding_references"] = [_normalize_funding(item) for item in normalized["funding_references"] if isinstance(item, dict)]
     return normalized
 
 
@@ -275,6 +315,26 @@ def validate_radar_metadata(metadata):
         _error(errors, "rights", "Please select a valid RADAR licence.")
     if data["rights"] == "Other" and not data["additional_rights"]:
         _error(errors, "additional_rights", "Please describe the custom rights statement.")
+    for index, publisher in enumerate(data["publishers"]):
+        if not publisher["name"]:
+            _error(errors, "publishers.{}.name".format(index), "Please provide the publisher name.")
+        identifier = publisher["name_identifier"]
+        scheme = publisher["name_identifier_scheme"]
+        scheme_uri = publisher["scheme_uri"]
+        if identifier and scheme not in NAME_IDENTIFIER_SCHEMES:
+            _error(errors, "publishers.{}.name_identifier_scheme".format(index), "Please select a valid publisher identifier scheme.")
+        if identifier and not scheme_uri:
+            _error(errors, "publishers.{}.scheme_uri".format(index), "Please provide the publisher identifier scheme URI.")
+        if scheme == "ROR" and identifier and not _valid_ror(identifier):
+            _error(errors, "publishers.{}.name_identifier".format(index), "Please provide a valid publisher ROR identifier.")
+        if scheme == "ROR" and identifier and scheme_uri != "https://ror.org/":
+            _error(errors, "publishers.{}.scheme_uri".format(index), "ROR publishers must use https://ror.org/ as the scheme URI.")
+        if scheme == "ORCID" and identifier and not _valid_orcid(identifier):
+            _error(errors, "publishers.{}.name_identifier".format(index), "Please provide a valid publisher ORCID.")
+        if scheme == "ORCID" and identifier and scheme_uri != "https://orcid.org/":
+            _error(errors, "publishers.{}.scheme_uri".format(index), "ORCID publishers must use https://orcid.org/ as the scheme URI.")
+        if not identifier and (scheme or scheme_uri):
+            _error(errors, "publishers.{}.name_identifier".format(index), "Enter a publisher identifier or clear its scheme fields.")
     for index, area in enumerate(data["subject_areas"]):
         controlled = _text(area.get("controlled") if isinstance(area, dict) else area)
         additional = _text(area.get("additional") if isinstance(area, dict) else "")
@@ -328,6 +388,9 @@ def validate_radar_metadata(metadata):
             _error(errors, "funding_references.{}.funder_identifier_type".format(index), "Please select a valid funder identifier type.")
         if item.get("funder_identifier_type") == "ROR" and item.get("funder_identifier") and not re.match(r"^(https://ror\.org/)?0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$", item["funder_identifier"], re.I):
             _error(errors, "funding_references.{}.funder_identifier".format(index), "Please provide a valid funder ROR identifier.")
+        # The development placeholder must never silently become RADAR metadata.
+        if item.get("award_number") == "12345":
+            _error(errors, "funding_references.{}.award_number".format(index), "Replace or remove the temporary testing award number 12345 before transfer.")
     for index, item in enumerate(data["software"]):
         if not isinstance(item, dict) or item.get("type") not in SOFTWARE_TYPES or not _text(item.get("name")) or not _text(item.get("version")):
             _error(errors, "software.{}".format(index), "Software requires a purpose, name, and version.")
@@ -366,6 +429,15 @@ def _structured_list(dataset, key):
     return value if isinstance(value, list) else []
 
 
+def _structured_value(dataset, key):
+    if dataset.get(key) not in (None, ""):
+        return dataset.get(key)
+    for extra in dataset.get("extras") or []:
+        if isinstance(extra, dict) and extra.get("key") == key:
+            return extra.get("value")
+    return None
+
+
 def _normalize_person(item):
     given = _text(item.get("given_name") or item.get("givenName"))
     family = _text(item.get("family_name") or item.get("familyName"))
@@ -378,10 +450,43 @@ def _normalize_person(item):
     }
 
 
-def _normalize_contributor(item):
+def _normalize_contributor(item, default_type=""):
     result = _normalize_person(item)
-    result["type"] = _text(item.get("type") or item.get("contributor_type"))
+    contributor_type = _text(
+        item.get("type") or item.get("contributor_type") or item.get("contributorRole")
+    )
+    result["type"] = (
+        contributor_type
+        if contributor_type in CONTRIBUTOR_TYPES
+        else default_type or contributor_type
+    )
     return result
+
+
+def _normalize_publisher(item):
+    if not isinstance(item, dict):
+        return {
+            "name": _text(item), "name_identifier": "",
+            "name_identifier_scheme": "", "scheme_uri": "",
+        }
+    return {
+        "name": _text(item.get("name") or item.get("publisher_name") or item.get("value")),
+        "name_identifier": _text(item.get("name_identifier") or item.get("nameIdentifier") or item.get("identifier")),
+        "name_identifier_scheme": _text(item.get("name_identifier_scheme") or item.get("nameIdentifierScheme") or item.get("identifier_scheme")),
+        "scheme_uri": _text(item.get("scheme_uri") or item.get("schemeURI")),
+    }
+
+
+def _normalize_funding(item):
+    return {
+        "funder_name": _text(item.get("funder_name") or item.get("funderName")),
+        "funder_identifier": _text(item.get("funder_identifier") or item.get("funderIdentifier")),
+        "funder_identifier_type": _text(item.get("funder_identifier_type") or item.get("funderIdentifierType")),
+        "funder_scheme_uri": _text(item.get("funder_scheme_uri") or item.get("schemeURI")),
+        "award_number": _text(item.get("award_number") or item.get("awardNumber")),
+        "award_uri": _text(item.get("award_uri") or item.get("awardURI")),
+        "award_title": _text(item.get("award_title") or item.get("awardTitle")),
+    }
 
 
 def _normalize_subject_area(item):
@@ -425,6 +530,50 @@ def _valid_orcid(value):
         total = (total + int(character)) * 2
     remainder = (12 - (total % 11)) % 11
     return compact[-1] == ("X" if remainder == 10 else str(remainder))
+
+
+def _valid_ror(value):
+    return bool(re.match(r"^(https://ror\.org/)?0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$", value, re.I))
+
+
+def _metadata_created_year(value):
+    value = _text(value)
+    if not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return ""
+    return "{:04d}".format(parsed.year)
+
+
+def normalize_project_id(value):
+    compact = re.sub(r"[^A-Z0-9]", "", _text(value).upper())
+    if compact in ("1153", "SFB1153"):
+        return "SFB1153"
+    if compact in ("1368", "SFB1368"):
+        return "SFB1368"
+    if compact in ("375", "TRR375"):
+        return "TRR375"
+    return ""
+
+
+def project_funding_default(project_id, award_number=None):
+    normalized_id = normalize_project_id(project_id)
+    title = PROJECT_FUNDING_DEFAULTS.get(normalized_id)
+    if not title:
+        return None
+    configured_award = _text(award_number)
+    return {
+        "funder_name": "Deutsche Forschungsgemeinschaft (DFG)",
+        "funder_identifier": "",
+        "funder_identifier_type": "",
+        "funder_scheme_uri": "",
+        "award_number": configured_award or "12345",
+        "award_uri": "",
+        "award_title": title,
+        "temporary_award_number": not bool(configured_award),
+    }
 
 
 def _coordinate(errors, value, minimum, maximum, field):

@@ -10,6 +10,7 @@ $(document).ready(function(){
         let step = $(this).attr("step");
         if( step === "2"){
             if($('#publish_target').val() === "radar"){
+                $('#publish_destination_selection').hide();
                 $('#publish_step1').hide();
                 $('#publish_radar_metadata_step').show();
                 $(this).attr("step", "radar-metadata");
@@ -26,6 +27,7 @@ $(document).ready(function(){
             else{
                 // GoToStep2();
                 $('#publish_step1').hide();
+                $('#publish_destination_selection').hide();
                 $('#publish_step2').show();
                 $(this).attr("step", "3");
             }
@@ -70,6 +72,7 @@ $(document).ready(function(){
         let step = $('#dataset_transfer_next_btn').attr('step');
         if(step === 'radar-metadata'){
             $('#publish_radar_metadata_step').hide();
+            $('#publish_destination_selection').show();
             $('#publish_step1').show();
             $('#dataset_transfer_next_btn').attr('step', '2');
             $(this).hide();
@@ -81,6 +84,7 @@ $(document).ready(function(){
         }
         else if(step === '3'){
             $('#publish_step2').hide();
+            $('#publish_destination_selection').show();
             $('#publish_step1').show();
             $('#dataset_transfer_next_btn').attr('step', '2');
             $(this).hide();
@@ -144,7 +148,8 @@ $(document).ready(function(){
                 }
                 show_publish_failure(
                     data && data.error ? data.error : "HTTP " + req.status,
-                    data && data.message ? data.message : get_publish_error_message(req)
+                    data && data.message ? data.message : get_publish_error_message(req),
+                    data && data.existing_transfer ? data.existing_transfer : null
                 );
             }
         };
@@ -236,14 +241,27 @@ $(document).ready(function(){
      $(document).on('click', '.radar-remove', function(){
         $(this).closest('.radar-row').remove();
      });
+     $(document).on('change', '.radar-publisher-scheme', function(){
+        update_publisher_scheme($(this).closest('.radar-publisher-row'));
+     });
+     $(document).on('input', '.radar-award-number', function(){
+        $(this).closest('.radar-row').find('.radar-funding-warning').toggle(clean_value($(this).val()) === '12345');
+     });
+     $('.radar-publisher-row').each(function(){ update_publisher_scheme($(this)); });
 
 });
 
 function update_publish_target_fields(){
+    $('#publish_destination_selection').show();
     $('#publish_radar_metadata_step, #publish_step2, #publish_step3').hide();
     $('#publish_step1').show();
     $('#dataset_transfer_next_btn').show().attr('step', '2');
     $('#dataset_transfer_submit, #dataset_transfer_back_btn').hide();
+    if(!$('#publish_target').val()){
+        $('#dataset_transfer_next_btn').prop('disabled', true);
+        return;
+    }
+    $('#dataset_transfer_next_btn').prop('disabled', false);
     if($('#publish_target').val() === "radar"){
         $('.luh-only').hide();
         $('.radar-only').show();
@@ -272,7 +290,7 @@ function collect_radar_metadata(){
     let metadata = {
         title: clean_value($('#radar_title').val()),
         descriptions: [], creators: [], contributors: [], additional_titles: [],
-        publishers: collect_text_rows('publishers'), production_year: clean_value($('#radar_production_year').val()),
+        publishers: [], production_year: clean_value($('#radar_production_year').val()),
         publication_year: '', subject_areas: [], resource_type: $('#radar_resource_type').val(),
         resource: clean_value($('#radar_resource').val()), rights: $('#radar_rights').val(),
         additional_rights: clean_value($('#radar_additional_rights').val()),
@@ -285,6 +303,7 @@ function collect_radar_metadata(){
     $('[data-radar-list="descriptions"] .radar-row').each(function(){ let value = clean_value($(this).find('.radar-value').val()); if(value){ metadata.descriptions.push({value: value, type: $(this).find('.radar-type').val()}); } });
     $('[data-radar-list="creators"] .radar-person-row').each(function(){ metadata.creators.push(collect_person($(this))); });
     $('[data-radar-list="contributors"] .radar-person-row').each(function(){ let item = collect_person($(this)); item.type = $(this).find('.radar-contributor-type').val(); metadata.contributors.push(item); });
+    $('[data-radar-list="publishers"] .radar-publisher-row').each(function(){ let row = $(this); metadata.publishers.push({name: clean_value(row.find('.radar-publisher-name').val()), name_identifier: clean_value(row.find('.radar-publisher-identifier').val()), name_identifier_scheme: row.find('.radar-publisher-scheme').val(), scheme_uri: clean_value(row.find('.radar-publisher-scheme-uri').val())}); });
     $('[data-radar-list="subject_areas"] .radar-row').each(function(){ metadata.subject_areas.push({controlled: $(this).find('.radar-subject-controlled').val(), additional: clean_value($(this).find('.radar-subject-additional').val())}); });
     $('[data-radar-list="keywords"] .radar-row').each(function(){ let value = clean_value($(this).find('.radar-value').val()); if(value){ metadata.keywords.push({value: value, scheme: $(this).find('.radar-keyword-scheme').val(), scheme_uri: clean_value($(this).find('.radar-scheme-uri').val()), value_uri: clean_value($(this).find('.radar-value-uri').val()), classification_code: clean_value($(this).find('.radar-classification-code').val()), ontology_uri: clean_value($(this).find('.radar-ontology-uri').val()), ontology_id: clean_value($(this).find('.radar-ontology-id').val())}); }});
     collect_object_rows('additional_titles', function(row){ return {value: clean_value(row.find('.radar-value').val()), type: row.find('.radar-type').val()}; }, metadata);
@@ -319,7 +338,7 @@ function validate_radar_metadata_in_browser(metadata){
     if(!metadata.creators.length){ errors.push({field: 'creators', message: 'Please add at least one creator.'}); }
     if(!metadata.production_year){ errors.push({field: 'production_year', message: 'Please provide the production year.'}); }
     if(!metadata.subject_areas.length){ errors.push({field: 'subject_areas', message: 'Please select a scientific subject area.'}); }
-    if(!metadata.publishers.length){ errors.push({field: 'publishers', message: 'Please provide a publisher.'}); }
+    if(!metadata.publishers.length || !metadata.publishers[0].name){ errors.push({field: 'publishers', message: 'Please provide a publisher.'}); }
     if(!metadata.rights){ errors.push({field: 'rights', message: 'Please select a licence.'}); }
     if(!metadata.rights_holders.length){ errors.push({field: 'rights_holders', message: 'Please provide a rights holder.'}); }
     return errors;
@@ -334,7 +353,7 @@ function render_radar_confirmation(metadata){
         ['Subject Areas', $.map(metadata.subject_areas, function(item){ return item.controlled + (item.additional ? ': ' + item.additional : ''); }).join('; ')],
         ['Resource Type', metadata.resource_type],
         ['Licence', metadata.rights],
-        ['Publishers', metadata.publishers.join('; ')],
+        ['Publishers', $.map(metadata.publishers, function(item){ return item.name; }).join('; ')],
         ['Rights Holders', metadata.rights_holders.join('; ')]
     ];
     $.each(rows, function(_, row){ body.append($('<tr></tr>').append($('<th></th>').text(row[0])).append($('<td></td>').text(row[1]))); });
@@ -353,6 +372,7 @@ function show_radar_validation_errors(errors){
         let base = (error.field || '').split('.')[0];
         let group = $('[data-radar-field="' + base + '"]').first();
         group.addClass('has-error').append($('<span class="help-block radar-error"></span>').text(error.message));
+        group.closest('details').prop('open', true);
     });
     $('#radar_validation_summary').append($('<strong></strong>').text('Please correct the following RADAR metadata:')).append(list).show();
     $('html, body').animate({scrollTop: $('#publish_radar_metadata_step').offset().top}, 200);
@@ -362,6 +382,7 @@ function add_radar_row(container, template){
     let remove = '<div class="col-md-1"><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>';
     let html = '';
     if(template === 'text'){ html = '<div class="radar-row input-group"><input class="form-control radar-value"><span class="input-group-btn"><button type="button" class="btn btn-danger radar-remove">&times;</button></span></div>'; }
+    else if(template === 'publisher'){ html = '<div class="radar-row radar-publisher-row"><div class="row"><div class="col-md-5"><label>Publisher Name *</label><input class="form-control radar-publisher-name"></div><div class="col-md-5"><label>Publisher Identifier</label><input class="form-control radar-publisher-identifier"></div>' + remove + '</div><div class="row"><div class="col-md-5"><label>Identifier Scheme</label><select class="form-control radar-publisher-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div><div class="col-md-5"><label>Scheme URI</label><input class="form-control radar-publisher-scheme-uri" readonly></div></div></div>'; }
     else if(template === 'textarea'){ html = '<div class="radar-row"><textarea class="form-control radar-value" rows="3"></textarea><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>'; }
     else if(template === 'creator' || template === 'contributor'){
         let role = template === 'contributor' ? '<div class="col-md-3"><select class="form-control radar-contributor-type">' + $('#radar-template-options').html() + '</select></div>' : '';
@@ -377,8 +398,25 @@ function add_radar_row(container, template){
     else if(template === 'software'){ html = '<div class="radar-row row"><div class="col-md-3"><input class="form-control radar-name" placeholder="Software name"></div><div class="col-md-2"><input class="form-control radar-version" placeholder="Version"></div><div class="col-md-3"><select class="form-control radar-type">' + $('#radar-template-software-options').html() + '</select></div><div class="col-md-3"><input class="form-control radar-alternative-name" placeholder="Alternative name"></div>' + remove + '</div>'; }
     else if(template === 'geo'){ html = '<div class="radar-row row"><div class="col-md-3"><select class="form-control radar-country"><option value="">Country</option>' + $('#radar-template-country-options').html() + '</select></div><div class="col-md-3"><input class="form-control radar-region" placeholder="Region"></div><div class="col-md-2"><input class="form-control radar-latitude" placeholder="Latitude"></div><div class="col-md-2"><input class="form-control radar-longitude" placeholder="Longitude"></div>' + remove + '</div>'; }
     else if(template === 'related-information'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Information"></div><div class="col-md-4"><input class="form-control radar-type" placeholder="Information type"></div>' + remove + '</div>'; }
-    else if(template === 'funding'){ html = '<div class="radar-row"><div class="row"><div class="col-md-4"><input class="form-control radar-funder-name" placeholder="Funder name"></div><div class="col-md-3"><input class="form-control radar-funder-identifier" placeholder="Funder identifier"></div><div class="col-md-3"><select class="form-control radar-funder-type">' + $('#radar-template-funder-options').html() + '</select></div>' + remove + '</div><div class="row"><div class="col-md-4"><input class="form-control radar-award-number" placeholder="Award number"></div><div class="col-md-4"><input class="form-control radar-award-uri" placeholder="Award URI"></div><div class="col-md-4"><input class="form-control radar-award-title" placeholder="Award title"></div></div></div>'; }
+    else if(template === 'funding'){ html = '<div class="radar-row"><div class="row"><div class="col-md-4"><input class="form-control radar-funder-name" placeholder="Funder name"></div><div class="col-md-3"><input class="form-control radar-funder-identifier" placeholder="Funder identifier"></div><div class="col-md-2"><select class="form-control radar-funder-type">' + $('#radar-template-funder-options').html() + '</select></div><div class="col-md-2"><input class="form-control radar-scheme-uri" placeholder="Scheme URI"></div>' + remove + '</div><div class="row"><div class="col-md-4"><input class="form-control radar-award-number" placeholder="Award number"></div><div class="col-md-4"><input class="form-control radar-award-uri" placeholder="Award URI"></div><div class="col-md-4"><input class="form-control radar-award-title" placeholder="Award title"></div></div></div>'; }
     container.find('.radar-rows').first().append(html);
+}
+
+function update_publisher_scheme(row){
+    let scheme = row.find('.radar-publisher-scheme').val();
+    let uri = row.find('.radar-publisher-scheme-uri');
+    if(scheme === 'ROR'){
+        uri.val('https://ror.org/').prop('readonly', true);
+    }
+    else if(scheme === 'ORCID'){
+        uri.val('https://orcid.org/').prop('readonly', true);
+    }
+    else if(scheme === 'Other'){
+        uri.prop('readonly', false);
+    }
+    else{
+        uri.val('').prop('readonly', true);
+    }
 }
 
 function parse_publish_response(responseText){
@@ -411,13 +449,18 @@ function show_publish_success(data){
     $('#published_url').find('a').text(data['published_url']);
 }
 
-function show_publish_failure(error, message){
+function show_publish_failure(error, message, existingTransfer){
     console.error("Dataset transfer publish failed", error, message);
     $('#publish_step_final').hide();
     $('#publish_result_section').hide();
     $('#publish_failed_section').show();
     $('#published_fail_type').text(error || "Unknown");
     $('#published_fail_message').text(message || "None");
+    if(existingTransfer && existingTransfer.published_url){
+        $('#published_fail_message').append(' ').append(
+            $('<a></a>').attr({href: existingTransfer.published_url, target: '_blank', rel: 'noopener'}).text('View existing transfer')
+        );
+    }
     $('#dataset_transfer_submit').data('publishing', false);
     $('#dataset_transfer_submit').prop('disabled', false);
 }
@@ -430,6 +473,7 @@ function check_user_has_api_token(){
         if (req.readyState == XMLHttpRequest.DONE && req.status === 200){            
             if(req.responseText === "True"){                
                 // GoToStep2();
+                $('#publish_destination_selection').hide();
                 $('#publish_step1').hide();
                 $('#publish_step2').show();
                 $('#dataset_transfer_next_btn').attr("step", "3");

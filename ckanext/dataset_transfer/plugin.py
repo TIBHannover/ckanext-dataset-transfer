@@ -57,5 +57,6 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
     def get_helpers(self):
         return {'is_dataset_published': BaseController.is_dataset_published,
                 'get_published_doi_and_url': BaseController.get_published_doi_and_url,
+                'get_transfer_status': BaseController.get_transfer_status,
                 'get_org_name': BaseController.which_sfb
         }

@@ -76,6 +76,38 @@
   display: none;
 }
 
+#publish_radar_metadata_step select.form-control {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #f3f3f3;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23555' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-position: right 12px center;
+  background-repeat: no-repeat;
+  border-color: #ccc;
+  height: 34px;
+  padding-right: 34px;
+}
+
+#publish_radar_metadata_step select.form-control:focus {
+  background-color: #fff;
+  border-color: #66afe9;
+}
+
+#publish_radar_metadata_step select.form-control:disabled {
+  background-color: #e5e5e5;
+  color: #777;
+  cursor: not-allowed;
+}
+
+#publish_radar_metadata_step .has-error select.form-control {
+  border-color: #a94442;
+}
+
+.radar-funding-warning {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+}
+
 
 #final_action_buttons{
     display: none;

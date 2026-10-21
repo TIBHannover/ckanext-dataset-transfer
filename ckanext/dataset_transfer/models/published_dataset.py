@@ -20,7 +20,10 @@ published_dataset_table = Table(
 )
 
 class PublishedDataset(domain_object.DomainObject):
-    def __init__(self, dataset_id=None, doi=None, published_url=None, publish_time=None, published_dataset_id=None):
+    TARGET_ID_PREFIX = u"dataset-transfer-target:"
+
+    def __init__(self, dataset_id=None, doi=None, published_url=None, publish_time=None,
+                 published_dataset_id=None):
         self.dataset_id = dataset_id
         self.doi = doi
         self.published_url = published_url
@@ -41,6 +44,44 @@ class PublishedDataset(domain_object.DomainObject):
         query = query.autoflush(autoflush)
         record = query.first()
         return record
+
+    @classmethod
+    def get_by_dataset_and_target(cls, id, target, autoflush=True):
+        if not id or target not in (u"luh", u"radar"):
+            return None
+        # Store the target alongside the remote identifier in the existing column.
+        # This avoids a database migration while keeping new records unambiguous.
+        return meta.Session.query(cls).filter(
+            cls.dataset_id == id,
+            cls.published_dataset_id.like(cls.target_prefix(target) + u"%"),
+        ).autoflush(autoflush).first()
+
+    @classmethod
+    def get_all_by_dataset(cls, id, autoflush=True):
+        if not id:
+            return []
+        return meta.Session.query(cls).filter(
+            cls.dataset_id == id
+        ).order_by(cls.publish_time.asc()).autoflush(autoflush).all()
+
+    @classmethod
+    def target_prefix(cls, target):
+        return cls.TARGET_ID_PREFIX + target + u":"
+
+    @classmethod
+    def encode_target_id(cls, target, published_dataset_id):
+        if target not in (u"luh", u"radar"):
+            raise ValueError("Unsupported repository target")
+        return cls.target_prefix(target) + (published_dataset_id or u"")
+
+    @classmethod
+    def decode_target_id(cls, value):
+        value = value or u""
+        for target in (u"luh", u"radar"):
+            prefix = cls.target_prefix(target)
+            if value.startswith(prefix):
+                return target, value[len(prefix):]
+        return None, value
 
 
 

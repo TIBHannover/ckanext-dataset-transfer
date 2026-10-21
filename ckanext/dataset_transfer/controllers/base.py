@@ -62,20 +62,28 @@ class BaseController():
         if not Helper.check_access_edit_package(package['id']):
                 return toolkit.abort(403, "Not Authorized")
         
-        if(BaseController.is_dataset_published(package['id'])):
-                # dataset is already published
-                toolkit.abort(400, "This dataset is already published")
-
         configured_publisher = toolkit.config.get(
             "ckanext.dataset_transfer.radar.publisher"
         ) or os.environ.get("CKANEXT_DATASET_TRANSFER_RADAR_PUBLISHER")
-        radar_metadata = map_ckan_to_radar(package, configured_publisher)
+        project_id = toolkit.config.get("ckanext.crc.project.id") or os.environ.get(
+            "CKANEXT__CRC__PROJECT__ID"
+        )
+        award_number = toolkit.config.get(
+            "ckanext.dataset_transfer.radar.dfg_award_number"
+        ) or os.environ.get("CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER")
+        radar_metadata = map_ckan_to_radar(
+            package,
+            configured_publisher,
+            project_id=project_id,
+            dfg_award_number=award_number,
+        )
         return render_template(
             'publish_page.html',
             pkg=package,
             pkg_dict=package,
             radar_metadata=radar_metadata,
             radar_vocabularies=VOCABULARIES,
+            transfer_status=BaseController.get_transfer_status(package["id"]),
         )
 
 
@@ -98,18 +106,6 @@ class BaseController():
                 request.remote_addr,
                 sorted(key for key in request.form.keys() if key != "api_token"),
             )
-            if(BaseController.is_dataset_published(package_id)):
-                # dataset is already published
-                log.warning(
-                    "Dataset transfer publish rejected package_id=%s reason=already_published",
-                    package_id,
-                )
-                return BaseController._error_response(
-                    "Already published",
-                    "This dataset is already published",
-                    400
-                )
-
             org_name = Helper.get_organization_id()
             api_token = request.form.get("api_token")
             save_api_token = request.form.get("save_api_token_box")
@@ -124,14 +120,41 @@ class BaseController():
                 len(dataset.get("resources") or []),
             )
             if not Helper.check_access_edit_package(dataset['id']):
-                    log.warning(
-                        "Dataset transfer publish rejected package_id=%s reason=not_authorized user=%s",
-                        dataset.get("id"),
-                        getattr(toolkit.g, "user", ""),
-                    )
-                    return BaseController._error_response(
-                        "Not Authorized", "Not Authorized", 403
-                    )
+                log.warning(
+                    "Dataset transfer publish rejected package_id=%s reason=not_authorized user=%s",
+                    dataset.get("id"),
+                    getattr(toolkit.g, "user", ""),
+                )
+                return BaseController._error_response(
+                    "Not Authorized", "Not Authorized", 403
+                )
+
+            if publish_target not in ("luh", "radar"):
+                return BaseController._error_response(
+                    "Invalid publish target",
+                    "Unknown publish target: {}".format(publish_target),
+                    400,
+                )
+
+            existing_transfer = PublishedDataset.get_by_dataset_and_target(
+                dataset["id"], publish_target
+            )
+            if existing_transfer:
+                log.warning(
+                    "Dataset transfer rejected package_id=%s target=%s reason=already_transferred",
+                    dataset["id"],
+                    publish_target,
+                )
+                return BaseController._error_response(
+                    "Already transferred",
+                    "This dataset has already been transferred to {}.".format(
+                        publish_target.upper()
+                    ),
+                    409,
+                    existing_transfer=BaseController._transfer_record(
+                        existing_transfer, serialize=True
+                    ),
+                )
             
             if terms_of_use_consent != "true" or rights_of_use_consent != "true":
                 log.warning(
@@ -190,8 +213,10 @@ class BaseController():
                     dataset_id=dataset["id"],
                     doi=radar_result.get("doi") or "",
                     published_url=radar_result["published_url"],
-                    published_dataset_id=radar_result["published_dataset_id"],
-                    publish_time=_time.now()
+                    published_dataset_id=PublishedDataset.encode_target_id(
+                        "radar", radar_result["published_dataset_id"]
+                    ),
+                    publish_time=_time.now(),
                 )
                 dataset_db_object.save()
                 log.info(
@@ -202,13 +227,6 @@ class BaseController():
                 )
                 return BaseController._json_response(radar_result)
 
-            if publish_target != "luh":
-                return BaseController._error_response(
-                    "Invalid publish target",
-                    "Unknown publish target: {}".format(publish_target),
-                    400
-                )
-                       
             if use_existing_api_token == "true":
                 # use the user existing api token
                 if BaseController.user_has_api_token() == "True":
@@ -386,8 +404,10 @@ class BaseController():
                 dataset_id=dataset_local_id,
                 doi=just_uploaded_dataset.get('doi') or '',
                 published_url=just_uploaded_dataset['published_url'],
-                published_dataset_id=just_uploaded_dataset['id'],
-                publish_time=_time.now()
+                published_dataset_id=PublishedDataset.encode_target_id(
+                    "luh", just_uploaded_dataset['id']
+                ),
+                publish_time=_time.now(),
             )
             dataset_db_object.save()
             log.info(
@@ -475,17 +495,46 @@ class BaseController():
     
 
 
-    def is_dataset_published(id):
+    def is_dataset_published(id, target=None):
         '''
             Check if a dataset is already published ot not.
         '''
 
 
-        db_object = PublishedDataset()
-        answer = db_object.get_by_dataset(id=id)
+        if target:
+            answer = PublishedDataset.get_by_dataset_and_target(id, target)
+        else:
+            answer = PublishedDataset.get_by_dataset(id=id)
         if not answer:
             return False
         return True
+
+    @staticmethod
+    def _transfer_record(record, serialize=False):
+        publish_time = record.publish_time
+        if serialize and publish_time:
+            publish_time = publish_time.isoformat()
+        target, published_dataset_id = PublishedDataset.decode_target_id(
+            record.published_dataset_id
+        )
+        return {
+            "target": target or "legacy",
+            "doi": record.doi or "",
+            "published_url": record.published_url or "",
+            "published_dataset_id": published_dataset_id,
+            "publish_time": publish_time,
+        }
+
+    @staticmethod
+    def get_transfer_status(dataset_id):
+        status = {"luh": None, "radar": None, "legacy": []}
+        for record in PublishedDataset.get_all_by_dataset(dataset_id):
+            item = BaseController._transfer_record(record)
+            if item["target"] in ("luh", "radar"):
+                status[item["target"]] = item
+            else:
+                status["legacy"].append(item)
+        return status
     
 
 

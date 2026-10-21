@@ -64,6 +64,23 @@ Add the RADAR test settings to your local CKAN config:
     ckanext.dataset_transfer.radar.default_rights = Other
     ckanext.dataset_transfer.radar.metadata_identifier_prefix = 10.0000
 
+Project-specific DFG funding defaults use `ckanext.crc.project.id` (or the
+Docker variable `CKANEXT__CRC__PROJECT__ID`). Configure the verified award
+number before transfer with:
+
+    ckanext.dataset_transfer.radar.dfg_award_number = VERIFIED_DFG_PROJECT_NUMBER
+
+Docker deployments may use
+`CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER`. Without this setting the
+review form displays the development placeholder `12345`, but server-side
+validation prevents that placeholder from being transferred to RADAR.
+
+Destination-aware transfer status does not require a database migration. New
+records store an explicit LUH or RADAR marker together with the remote dataset
+identifier in the existing `published_dataset_id` column. Older unmarked rows
+are displayed as legacy transfers with an unknown destination; their target is
+not guessed from DOI prefixes or URLs.
+
 For local testing, either provide a temporary RADAR access token:
 
     ckanext.dataset_transfer.radar.access_token = YOUR_ACCESS_TOKEN

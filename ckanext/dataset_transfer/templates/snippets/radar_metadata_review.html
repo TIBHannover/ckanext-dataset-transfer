@@ -2,7 +2,8 @@
   {% set abstract_descriptions = radar_metadata.descriptions|selectattr('type', 'equalto', 'Abstract')|list %}
   {% set additional_descriptions = radar_metadata.descriptions|rejectattr('type', 'equalto', 'Abstract')|list %}
   <div class="alert alert-info">
-    <strong>{{ _('RADAR metadata review') }}</strong>
+    <strong>{{ _('Review RADAR Metadata') }}</strong>
+    <p>{{ _('Review the metadata imported from CKAN and complete the required information before transferring the dataset to RADAR.') }}</p>
     <p>{{ _('Values marked as imported came from CKAN. Changes on this page are used only for the RADAR submission and do not modify the CKAN dataset.') }}</p>
     <p>{{ _('RADAR assigns the final DOI and publication year. They cannot be entered here.') }}</p>
   </div>
@@ -28,6 +29,7 @@
       <div class="col-md-4 form-group radar-required" data-radar-field="production_year">
         <label for="radar_production_year">{{ _('Production Year') }} <span class="required">*</span></label>
         <input id="radar_production_year" class="form-control" placeholder="YYYY, YYYY-YYYY, or unknown" value="{{ radar_metadata.production_year }}">
+        <span class="help-block">{{ _('Pre-filled from the CKAN dataset creation date. Please confirm or adjust the actual data production year.') }}</span>
       </div>
       <div class="col-md-4 form-group radar-imported" data-radar-field="resource_type">
         <label for="radar_resource_type">{{ _('Resource Type') }} <span class="required">*</span></label>
@@ -113,18 +115,37 @@
 
   <fieldset class="radar-section">
     <legend>{{ _('Rights and Publication') }}</legend>
-    <div class="radar-repeatable radar-required" data-radar-list="publishers" data-radar-field="publishers"><label>{{ _('Publishers') }} <span class="required">*</span></label><div class="radar-rows">{% for publisher in radar_metadata.publishers %}<div class="radar-row input-group"><input class="form-control radar-value" value="{{ publisher }}"><span class="input-group-btn"><button type="button" class="btn btn-danger radar-remove">&times;</button></span></div>{% endfor %}</div><button type="button" class="btn btn-default btn-sm radar-add" data-template="text">{{ _('Add Publisher') }}</button><span class="help-block">{{ _('The CKAN organization is only a candidate; confirm or correct it.') }}</span></div>
+    <div class="radar-repeatable radar-required" data-radar-list="publishers" data-radar-field="publishers">
+      <label>{{ _('Publishers') }} <span class="required">*</span></label>
+      <div class="radar-rows">
+        {% for publisher in radar_metadata.publishers %}
+          <div class="radar-row radar-publisher-row">
+            <div class="row">
+              <div class="col-md-5 form-group"><label>{{ _('Publisher Name') }} *</label><input class="form-control radar-publisher-name" value="{{ publisher.name }}"></div>
+              <div class="col-md-5 form-group"><label>{{ _('Publisher Identifier') }}</label><input class="form-control radar-publisher-identifier" value="{{ publisher.name_identifier }}"></div>
+              <div class="col-md-1"><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>
+            </div>
+            <div class="row">
+              <div class="col-md-5 form-group"><label>{{ _('Identifier Scheme') }}</label><select class="form-control radar-publisher-scheme"><option value="">{{ _('No identifier') }}</option>{% for value in radar_vocabularies.name_identifier_schemes %}<option value="{{ value }}"{% if value == publisher.name_identifier_scheme %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+              <div class="col-md-5 form-group"><label>{{ _('Scheme URI') }}</label><input class="form-control radar-publisher-scheme-uri" value="{{ publisher.scheme_uri }}"></div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      <button type="button" class="btn btn-default btn-sm radar-add" data-template="publisher">{{ _('Add Publisher') }}</button>
+      <span class="help-block">{{ _('The CKAN organization is only a candidate; confirm the legal publisher. No organization identifier is inferred from its name.') }}</span>
+    </div>
     <div class="form-group radar-required" data-radar-field="rights"><label for="radar_rights">{{ _('Licence') }} <span class="required">*</span></label><select id="radar_rights" class="form-control"><option value="">{{ _('Select a RADAR licence') }}</option>{% for value in radar_vocabularies.rights %}<option value="{{ value }}"{% if value == radar_metadata.rights %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
     <div class="form-group" data-radar-field="additional_rights"><label for="radar_additional_rights">{{ _('Additional rights statement') }}</label><textarea id="radar_additional_rights" class="form-control"></textarea></div>
     <div class="radar-repeatable radar-required" data-radar-list="rights_holders" data-radar-field="rights_holders"><label>{{ _('Rights Holders') }} <span class="required">*</span></label><div class="radar-rows">{% for holder in radar_metadata.rights_holders %}<div class="radar-row input-group"><input class="form-control radar-value" value="{{ holder }}"><span class="input-group-btn"><button type="button" class="btn btn-danger radar-remove">&times;</button></span></div>{% endfor %}</div><button type="button" class="btn btn-default btn-sm radar-add" data-template="text">{{ _('Add Rights Holder') }}</button></div>
   </fieldset>
 
-  <details class="radar-section radar-optional">
+  <details class="radar-section radar-optional"{% if radar_metadata.funding_references %} open{% endif %}>
     <summary>{{ _('Additional Research Metadata (optional)') }}</summary>
     <p class="help-block">{{ _('Only completed rows are included in the RADAR XML.') }}</p>
     <div class="radar-repeatable" data-radar-list="alternate_identifiers"><label>{{ _('Alternate Identifiers') }}</label><div class="radar-rows"></div><button type="button" class="btn btn-default btn-sm radar-add" data-template="alternate-identifier">{{ _('Add Alternate Identifier') }}</button></div>
     <div class="radar-repeatable" data-radar-list="related_identifiers"><label>{{ _('Related Identifiers') }}</label><div class="radar-rows"></div><button type="button" class="btn btn-default btn-sm radar-add" data-template="related-identifier">{{ _('Add Related Identifier') }}</button></div>
-    <div class="radar-repeatable" data-radar-list="funding_references"><label>{{ _('Funding References') }}</label><div class="radar-rows"></div><button type="button" class="btn btn-default btn-sm radar-add" data-template="funding">{{ _('Add Funding Reference') }}</button></div>
+    <div class="radar-repeatable" data-radar-list="funding_references" data-radar-field="funding_references"><label>{{ _('Funding References') }}</label><div class="radar-rows">{% for funding in radar_metadata.funding_references %}<div class="radar-row"><div class="row"><div class="col-md-4"><label>{{ _('Funder Name') }}</label><input class="form-control radar-funder-name" value="{{ funding.funder_name }}"></div><div class="col-md-3"><label>{{ _('Funder Identifier') }}</label><input class="form-control radar-funder-identifier" value="{{ funding.funder_identifier }}"></div><div class="col-md-2"><label>{{ _('Identifier Type') }}</label><select class="form-control radar-funder-type"><option value=""></option>{% for value in radar_vocabularies.funder_identifier_types %}<option value="{{ value }}"{% if value == funding.funder_identifier_type %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></div><div class="col-md-2"><label>{{ _('Scheme URI') }}</label><input class="form-control radar-scheme-uri" value="{{ funding.funder_scheme_uri }}"></div><div class="col-md-1"><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div></div><div class="row"><div class="col-md-4"><label>{{ _('Award Number') }}</label><input class="form-control radar-award-number" value="{{ funding.award_number }}"></div><div class="col-md-4"><label>{{ _('Award URI') }}</label><input class="form-control radar-award-uri" value="{{ funding.award_uri }}"></div><div class="col-md-4"><label>{{ _('Project Title') }}</label><input class="form-control radar-award-title" value="{{ funding.award_title }}"></div></div>{% if funding.temporary_award_number %}<div class="alert alert-warning radar-funding-warning">{{ _('Temporary funding number for testing. Replace with the actual DFG project number before publication.') }}</div>{% endif %}</div>{% endfor %}</div><button type="button" class="btn btn-default btn-sm radar-add" data-template="funding">{{ _('Add Funding Reference') }}</button></div>
     <div class="radar-repeatable" data-radar-list="data_sources"><label>{{ _('Data Sources') }}</label><div class="radar-rows"></div><button type="button" class="btn btn-default btn-sm radar-add" data-template="data-source">{{ _('Add Data Source') }}</button></div>
     <div class="radar-repeatable" data-radar-list="software"><label>{{ _('Software Information') }}</label><div class="radar-rows"></div><button type="button" class="btn btn-default btn-sm radar-add" data-template="software">{{ _('Add Software') }}</button></div>
     <div class="radar-repeatable" data-radar-list="data_processing"><label>{{ _('Data Processing') }}</label><div class="radar-rows">{% for value in radar_metadata.data_processing %}<div class="radar-row"><textarea class="form-control radar-value" rows="3">{{ value }}</textarea><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>{% endfor %}</div><button type="button" class="btn btn-default btn-sm radar-add" data-template="textarea">{{ _('Add Processing Description') }}</button></div>
@@ -133,7 +154,8 @@
   </details>
 </section>
 
-<script type="text/template" id="radar-template-options">{% for value in radar_vocabularies.contributor_types %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</script>
+<script type="text/template" id="radar-template-options">{% for value in radar_vocabularies.contributor_types %}<option value="{{ value }}"{% if value == 'DataManager' %} selected{% endif %}>{{ value }}</option>{% endfor %}</script>
+<script type="text/template" id="radar-template-publisher-scheme-options"><option value="">No identifier</option>{% for value in radar_vocabularies.name_identifier_schemes %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</script>
 <script type="text/template" id="radar-template-subject-options"><option value="">Select a subject area</option>{% for value in radar_vocabularies.subject_areas %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</script>
 <script type="text/template" id="radar-template-related-id-options">{% for value in radar_vocabularies.related_identifier_types %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</script>
 <script type="text/template" id="radar-template-relation-options">{% for value in radar_vocabularies.relation_types %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</script>

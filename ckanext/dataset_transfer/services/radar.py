@@ -561,7 +561,19 @@ def build_radar_metadata_xml(metadata, identifier_prefix=None, **legacy_options)
 
     publishers = ET.SubElement(root, _element_tag("publishers"))
     for publisher in data["publishers"]:
-        ET.SubElement(publishers, _element_tag("publisher")).text = publisher
+        attributes = _attributes(
+            publisher,
+            (
+                ("name_identifier_scheme", "nameIdentifierScheme"),
+                ("scheme_uri", "schemeURI"),
+                ("name_identifier", "nameIdentifier"),
+            ),
+        )
+        ET.SubElement(
+            publishers,
+            _element_tag("publisher"),
+            attributes,
+        ).text = publisher["name"]
     ET.SubElement(root, _element_tag("productionYear")).text = data["production_year"]
     if data["publication_year"]:
         ET.SubElement(root, _element_tag("publicationYear")).text = data["publication_year"]

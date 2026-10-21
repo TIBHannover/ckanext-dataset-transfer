@@ -3,12 +3,36 @@
 
 {% block package_notes %}    
     {% asset 'ckanext-dataset-transfer/info-css' %}
-     {% if h.is_dataset_published(pkg['id']) %}
+     {% set transfer_status = h.get_transfer_status(pkg['id']) %}
+     {% if transfer_status.radar or transfer_status.luh or transfer_status.legacy %}
         <div class="row publish-info-box">
             <div class="col-sm-12">
-                <h4>This dataset is Published:</h4>
-                <div class="publish-result-field"></div> <b>DOI:</b>  {{h.get_published_doi_and_url(pkg['id'])[0]}}
-                <div class="publish-result-field"></div> <b>URL:</b> <a href="{{h.get_published_doi_and_url(pkg['id'])[1]}}" target="_blank">{{h.get_published_doi_and_url(pkg['id'])[1]}}</a>
+                <h4>{{ _('Transferred to repositories') }}</h4>
+                {% if transfer_status.radar %}
+                  <div class="repository-transfer-status">
+                    <strong>RADAR</strong> — {{ _('Transferred; created in PENDING state (formal publication status is not tracked)') }}
+                    {% if transfer_status.radar.publish_time %}<div>{{ _('Transfer date') }}: {{ h.render_datetime(transfer_status.radar.publish_time, with_hours=True) }}</div>{% endif %}
+                    {% if transfer_status.radar.doi %}<div>DOI: {{ transfer_status.radar.doi }}</div>{% endif %}
+                    {% if transfer_status.radar.published_dataset_id %}<div>{{ _('RADAR dataset identifier') }}: {{ transfer_status.radar.published_dataset_id }}</div>{% endif %}
+                    {% if transfer_status.radar.published_url %}<div><a href="{{ transfer_status.radar.published_url }}" target="_blank" rel="noopener">{{ _('View RADAR dataset') }}</a></div>{% endif %}
+                  </div>
+                {% endif %}
+                {% if transfer_status.luh %}
+                  <div class="repository-transfer-status">
+                    <strong>LUH</strong> — {{ _('Transferred') }}
+                    {% if transfer_status.luh.publish_time %}<div>{{ _('Transfer date') }}: {{ h.render_datetime(transfer_status.luh.publish_time, with_hours=True) }}</div>{% endif %}
+                    {% if transfer_status.luh.doi %}<div>DOI: {{ transfer_status.luh.doi }}</div>{% endif %}
+                    {% if transfer_status.luh.published_url %}<div><a href="{{ transfer_status.luh.published_url }}" target="_blank" rel="noopener">{{ _('View LUH dataset') }}</a></div>{% endif %}
+                  </div>
+                {% endif %}
+                {% for record in transfer_status.legacy %}
+                  <div class="repository-transfer-status repository-transfer-legacy">
+                    <strong>{{ _('Legacy transfer') }}</strong> — {{ _('destination unknown') }}
+                    {% if record.publish_time %}<div>{{ _('Transfer date') }}: {{ h.render_datetime(record.publish_time, with_hours=True) }}</div>{% endif %}
+                    {% if record.doi %}<div>DOI: {{ record.doi }}</div>{% endif %}
+                    {% if record.published_url %}<div><a href="{{ record.published_url }}" target="_blank" rel="noopener">{{ _('View transferred dataset') }}</a></div>{% endif %}
+                  </div>
+                {% endfor %}
             </div>
         </div>
      {% endif %}
