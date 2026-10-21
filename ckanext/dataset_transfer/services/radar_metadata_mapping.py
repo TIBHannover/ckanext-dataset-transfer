@@ -149,7 +149,23 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
     if creators:
         creators = [_normalize_person(item) for item in creators if isinstance(item, dict)]
     elif _text(source.get("author")):
-        creators = [{"name": _text(source.get("author")), "given_name": "", "family_name": "", "orcid": "", "affiliation": "", "affiliation_ror": ""}]
+        creators = [{"name": _text(source.get("author")), "given_name": "", "family_name": "", "orcid": "", "affiliation": organization_title, "affiliation_ror": ""}]
+
+    # CKAN's author is the person; the owning organization is only a candidate
+    # affiliation and remains editable in the RADAR review form.
+    organization_identity = (
+        _organization_rights_holder(organization) if organization_title else {}
+    )
+    organization_ror = (
+        organization_identity.get("name_identifier", "")
+        if organization_identity.get("name_identifier_scheme") == "ROR"
+        else ""
+    )
+    for creator in creators:
+        if not creator.get("affiliation"):
+            creator["affiliation"] = organization_title
+        if creator.get("affiliation") == organization_title and not creator.get("affiliation_ror"):
+            creator["affiliation_ror"] = organization_ror
 
     contributors = _structured_list(source, "contributors")
     contributors = [
@@ -394,7 +410,9 @@ def validate_radar_metadata(metadata):
             _error(errors, "alternate_identifiers.{}".format(index), "Each alternate identifier needs a value and type.")
     for index, creator in enumerate(data["creators"]):
         if not _person_name(creator):
-            _error(errors, "creators.{}.name".format(index), "Please provide the creator name.")
+            _error(errors, "creators.{}.name".format(index), "Please provide the creator's personal name.")
+        if not _text(creator.get("affiliation")):
+            _error(errors, "creators.{}.affiliation".format(index), "Please provide the creator's affiliation or institute.")
         _validate_person_identifiers(errors, warnings, creator, "creators.{}".format(index))
     for index, contributor in enumerate(data["contributors"]):
         if not _person_name(contributor):
