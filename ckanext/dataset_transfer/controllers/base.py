@@ -3,6 +3,7 @@
 import copy
 import json
 import logging
+import os
 
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
@@ -14,6 +15,12 @@ from ckanext.dataset_transfer.services.radar import (
     RadarConfigError,
     RadarPublishError,
     RadarPublisher,
+)
+from ckanext.dataset_transfer.services.radar_metadata_mapping import (
+    VOCABULARIES,
+    map_ckan_to_radar,
+    normalize_reviewed_metadata,
+    validate_radar_metadata,
 )
 from datetime import datetime as _time
 
@@ -37,12 +44,14 @@ class BaseController():
         )
 
     @staticmethod
-    def _error_response(error, message, status=500):
-        return BaseController._json_response({
+    def _error_response(error, message, status=500, **details):
+        payload = {
             "success": False,
             "error": error,
             "message": message
-        }, status=status)
+        }
+        payload.update(details)
+        return BaseController._json_response(payload, status=status)
 
 
     def publish_page(dataset_name):
@@ -57,7 +66,17 @@ class BaseController():
                 # dataset is already published
                 toolkit.abort(400, "This dataset is already published")
 
-        return render_template('publish_page.html', pkg=package, pkg_dict=package)
+        configured_publisher = toolkit.config.get(
+            "ckanext.dataset_transfer.radar.publisher"
+        ) or os.environ.get("CKANEXT_DATASET_TRANSFER_RADAR_PUBLISHER")
+        radar_metadata = map_ckan_to_radar(package, configured_publisher)
+        return render_template(
+            'publish_page.html',
+            pkg=package,
+            pkg_dict=package,
+            radar_metadata=radar_metadata,
+            radar_vocabularies=VOCABULARIES,
+        )
 
 
 
@@ -133,8 +152,23 @@ class BaseController():
                     dataset.get("id"),
                     getattr(toolkit.g, "user", ""),
                 )
+                reviewed_metadata = normalize_reviewed_metadata(
+                    request.form.get("radar_metadata")
+                )
+                validation = validate_radar_metadata(reviewed_metadata)
+                if not validation["success"]:
+                    return BaseController._error_response(
+                        "RADAR metadata validation failed",
+                        "Please correct the highlighted RADAR metadata fields.",
+                        400,
+                        errors=validation["errors"],
+                        warnings=validation["warnings"],
+                    )
                 try:
-                    radar_result = RadarPublisher().publish_dataset(dataset)
+                    radar_result = RadarPublisher().publish_dataset(
+                        dataset,
+                        validation["metadata"],
+                    )
                 except RadarConfigError as error:
                     log.exception(
                         "Dataset transfer RADAR configuration failed package_id=%s",

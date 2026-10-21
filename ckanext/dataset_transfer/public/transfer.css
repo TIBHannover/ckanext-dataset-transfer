@@ -6,11 +6,73 @@
   text-decoration: underline;
 }
 
-#publish_step2, #publish_step3, #publish_step_final, #publish_result_section, #publish_failed_section{
+#publish_radar_metadata_step, #publish_step2, #publish_step3, #publish_step_final, #publish_result_section, #publish_failed_section{
   display: none;
 }
 
-#dataset_transfer_submit{
+#dataset_transfer_submit, #dataset_transfer_back_btn{
+  display: none;
+}
+
+.radar-section {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin: 0 0 20px;
+  padding: 15px;
+}
+
+.radar-section legend {
+  border: 0;
+  margin-bottom: 12px;
+  width: auto;
+}
+
+.radar-imported {
+  border-left: 4px solid #31708f;
+  padding-left: 12px;
+}
+
+.radar-required.has-error, .form-group.has-error {
+  border-left-color: #a94442;
+}
+
+.radar-repeatable {
+  margin-bottom: 20px;
+}
+
+.radar-row {
+  background: #f8f8f8;
+  border: 1px solid #e5e5e5;
+  border-radius: 3px;
+  margin: 0 0 10px;
+  padding: 10px;
+}
+
+.radar-row.row {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.radar-person-row .row + .row {
+  margin-top: 8px;
+}
+
+.radar-remove {
+  margin-top: 2px;
+}
+
+.radar-optional summary {
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 15px;
+}
+
+#radar_validation_summary {
+  display: none;
+}
+
+.radar-only {
   display: none;
 }
 

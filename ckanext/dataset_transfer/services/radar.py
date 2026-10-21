@@ -10,6 +10,10 @@ from xml.etree import ElementTree as ET
 
 import requests
 import ckan.plugins.toolkit as toolkit
+from ckanext.dataset_transfer.services.radar_metadata_mapping import (
+    map_ckan_to_radar,
+    validate_radar_metadata,
+)
 
 
 log = logging.getLogger(__name__)
@@ -52,39 +56,39 @@ class RadarPublisher(object):
         self.requests = request_session or requests
         self.context_url = self._required("ckanext.dataset_transfer.radar.context_url").rstrip("/")
         self.workspace_id = self._required("ckanext.dataset_transfer.radar.workspace_id")
-        self.schema_key = self.config.get("ckanext.dataset_transfer.radar.schema_key", "RDDM")
-        self.schema_version = self.config.get("ckanext.dataset_transfer.radar.schema_version", "9.3")
+        self.schema_key = self._setting("ckanext.dataset_transfer.radar.schema_key", "RDDM")
+        self.schema_version = self._setting("ckanext.dataset_transfer.radar.schema_version", "9.3")
         self.responsible_email = self._required(
             "ckanext.dataset_transfer.radar.responsible_email"
         )
         self.retention_period = int(
-            self.config.get("ckanext.dataset_transfer.radar.retention_period", 10)
+            self._setting("ckanext.dataset_transfer.radar.retention_period", 10)
         )
-        self.dataset_url_template = self.config.get(
+        self.dataset_url_template = self._setting(
             "ckanext.dataset_transfer.radar.dataset_url_template",
             self.context_url + "/datasets/{dataset_id}",
         )
-        self.ingest_url = self.config.get(
+        self.ingest_url = self._setting(
             "ckanext.dataset_transfer.radar.ingest_url",
             self.context_url.replace("/radar", "") + "/radar-ingest",
         ).rstrip("/")
-        self.descriptive_xsd_path = self.config.get(
+        self.descriptive_xsd_path = self._setting(
             "ckanext.dataset_transfer.radar.descriptive_xsd_path",
             str(DEFAULT_RADAR_DATASET_XSD),
         )
-        self.metadata_identifier_prefix = self.config.get(
+        self.metadata_identifier_prefix = self._setting(
             "ckanext.dataset_transfer.radar.metadata_identifier_prefix",
             "10.0000",
         )
-        self.publisher = self.config.get(
+        self.publisher = self._setting(
             "ckanext.dataset_transfer.radar.publisher",
             "TIB",
         )
-        self.default_subject_area = self.config.get(
+        self.default_subject_area = self._setting(
             "ckanext.dataset_transfer.radar.default_subject_area",
             "Other",
         )
-        self.default_rights = self.config.get(
+        self.default_rights = self._setting(
             "ckanext.dataset_transfer.radar.default_rights",
             "Other",
         )
@@ -100,7 +104,7 @@ class RadarPublisher(object):
         )
 
     def _access_token(self):
-        configured_token = self.config.get("ckanext.dataset_transfer.radar.access_token")
+        configured_token = self._setting("ckanext.dataset_transfer.radar.access_token")
         if configured_token:
             log.info("RADAR publish using configured access token")
             return configured_token
@@ -134,34 +138,41 @@ class RadarPublisher(object):
             raise RadarPublishError("RADAR token response did not contain access_token")
         return token_json["access_token"]
 
-    def publish_dataset(self, dataset):
+    def publish_dataset(self, dataset, reviewed_metadata=None):
         log.info(
             "RADAR publish started package_id=%s package_name=%s resource_count=%s",
             dataset.get("id"),
             dataset.get("name"),
             len(dataset.get("resources") or []),
         )
+        metadata = reviewed_metadata or map_ckan_to_radar(dataset, self.publisher)
+        validation = validate_radar_metadata(metadata)
+        if not validation["success"]:
+            raise RadarPublishError(
+                "RADAR metadata is incomplete: {}".format(
+                    "; ".join(item["message"] for item in validation["errors"])
+                )
+            )
+        metadata_xml = build_radar_metadata_xml(
+            validation["metadata"],
+            identifier_prefix=self.metadata_identifier_prefix,
+        )
+        validate_radar_metadata_xml(metadata_xml, self.descriptive_xsd_path)
+        log.info("RADAR local metadata validation passed package_id=%s", dataset.get("id"))
+
+        # Authentication and dataset creation intentionally happen only after all
+        # local semantic and XSD validation has passed.
         access_token = self._access_token()
         headers = {"Authorization": "Bearer {}".format(access_token)}
 
         created_dataset = self._create_dataset(dataset, headers)
         dataset_id = created_dataset["id"]
-
-        metadata_xml = build_radar_metadata_xml(
-            dataset,
-            identifier_prefix=self.metadata_identifier_prefix,
-            publisher=self.publisher,
-            subject_area=self.default_subject_area,
-            rights=self.default_rights,
-        )
         log.info(
             "RADAR metadata XML generated package_id=%s bytes=%s xsd_path=%s",
             dataset.get("id"),
             len(metadata_xml),
             self.descriptive_xsd_path,
         )
-        validate_radar_metadata_xml(metadata_xml, self.descriptive_xsd_path)
-        log.info("RADAR local metadata validation passed package_id=%s", dataset.get("id"))
         self._upload_metadata(dataset_id, metadata_xml, headers)
 
         # RADAR removes the schema-valid placeholder identifier on upload. It must
@@ -498,89 +509,190 @@ class RadarPublisher(object):
         return default
 
 
-def build_radar_metadata_xml(
-    dataset,
-    identifier_prefix="10.0000",
-    publisher="TIB",
-    subject_area="Other",
-    rights="Other",
-):
+def build_radar_metadata_xml(metadata, identifier_prefix=None, **legacy_options):
+    validation = validate_radar_metadata(metadata)
+    if not validation["success"]:
+        raise RadarPublishError(
+            "RADAR metadata is incomplete: {}".format(
+                "; ".join(item["message"] for item in validation["errors"])
+            )
+        )
+    data = validation["metadata"]
     root = ET.Element(
         _dataset_tag("radarDataset"),
         {"{{{}}}schemaLocation".format(XSI_NS): SCHEMA_LOCATION},
     )
-    identifier = ET.SubElement(root, _element_tag("identifier"), {"identifierType": "DOI"})
-    identifier.text = _metadata_identifier(dataset, identifier_prefix)
+    identifier = ET.SubElement(root, _element_tag("identifier"), {"identifierType": "RADAR"})
+    identifier.text = "RADAR/pending-assignment"
 
-    author = dataset.get("author") or dataset.get("creator") or dataset.get("maintainer")
-    author = author or publisher or "Unknown"
-    if author:
-        creators = ET.SubElement(root, _element_tag("creators"))
+    _append_identifier_list(root, "alternateIdentifiers", "alternateIdentifier", data["alternate_identifiers"], "alternateIdentifierType", "type")
+    related_identifiers = _container(root, "relatedIdentifiers", data["related_identifiers"])
+    if related_identifiers is not None:
+        for item in data["related_identifiers"]:
+            ET.SubElement(related_identifiers, _element_tag("relatedIdentifier"), {
+                "relatedIdentifierType": item["identifier_type"], "relationType": item["relation_type"],
+            }).text = item["value"]
+
+    creators = ET.SubElement(root, _element_tag("creators"))
+    for item in data["creators"]:
         creator = ET.SubElement(creators, _element_tag("creator"))
-        ET.SubElement(creator, _element_tag("creatorName")).text = author
+        _append_person(creator, item, "creator")
 
-    maintainer = dataset.get("maintainer")
-    if maintainer:
+    if data["contributors"]:
         contributors = ET.SubElement(root, _element_tag("contributors"))
-        contributor = ET.SubElement(
-            contributors,
-            _element_tag("contributor"),
-            {"contributorType": "ContactPerson"},
-        )
-        if maintainer:
-            ET.SubElement(contributor, _element_tag("contributorName")).text = maintainer
+        for item in data["contributors"]:
+            contributor = ET.SubElement(contributors, _element_tag("contributor"), {"contributorType": item["type"]})
+            _append_person(contributor, item, "contributor")
 
-    ET.SubElement(root, _element_tag("title")).text = (
-        dataset.get("title") or dataset.get("name") or "CKAN dataset"
-    )
-
-    notes = dataset.get("notes")
-    if notes:
+    ET.SubElement(root, _element_tag("title")).text = data["title"]
+    additional_titles = _container(root, "additionalTitles", data["additional_titles"])
+    if additional_titles is not None:
+        for item in data["additional_titles"]:
+            ET.SubElement(additional_titles, _element_tag("additionalTitle"), {"additionalTitleType": item["type"]}).text = item["value"]
+    if data["descriptions"]:
         descriptions = ET.SubElement(root, _element_tag("descriptions"))
-        description = ET.SubElement(
-            descriptions,
-            _element_tag("description"),
-            {"descriptionType": "Abstract"},
-        )
-        description.text = notes
-
-    tags = dataset.get("tags") or []
-    if tags:
+        for item in data["descriptions"]:
+            ET.SubElement(descriptions, _element_tag("description"), {"descriptionType": item.get("type") or "Abstract"}).text = item["value"]
+    if data["keywords"]:
         keywords = ET.SubElement(root, _element_tag("keywords"))
-        for tag in tags:
-            name = tag.get("display_name") or tag.get("name")
-            if name:
-                ET.SubElement(keywords, _element_tag("keyword"), {"keywordScheme": "Other"}).text = name
+        for item in data["keywords"]:
+            attributes = _attributes(item, (("scheme", "keywordScheme"), ("scheme_uri", "schemeURI"), ("value_uri", "valueURI"), ("classification_code", "classificationCode"), ("ontology_uri", "ontologyURI"), ("ontology_id", "ontologyId")))
+            ET.SubElement(keywords, _element_tag("keyword"), attributes).text = item["value"]
 
     publishers = ET.SubElement(root, _element_tag("publishers"))
-    ET.SubElement(publishers, _element_tag("publisher")).text = publisher or "TIB"
-
-    ET.SubElement(root, _element_tag("productionYear")).text = _production_year(dataset)
-    language = _language(dataset)
-    if language:
-        ET.SubElement(root, _element_tag("language")).text = language
+    for publisher in data["publishers"]:
+        ET.SubElement(publishers, _element_tag("publisher")).text = publisher
+    ET.SubElement(root, _element_tag("productionYear")).text = data["production_year"]
+    if data["publication_year"]:
+        ET.SubElement(root, _element_tag("publicationYear")).text = data["publication_year"]
+    if data["language"]:
+        ET.SubElement(root, _element_tag("language")).text = data["language"]
 
     subject_areas = ET.SubElement(root, _element_tag("subjectAreas"))
-    subject_area_node = ET.SubElement(subject_areas, _element_tag("subjectArea"))
-    ET.SubElement(subject_area_node, _element_tag("controlledSubjectAreaName")).text = (
-        subject_area or "Other"
-    )
+    for item in data["subject_areas"]:
+        controlled = item.get("controlled") if isinstance(item, dict) else item
+        additional = item.get("additional") if isinstance(item, dict) else ""
+        node = ET.SubElement(subject_areas, _element_tag("subjectArea"))
+        ET.SubElement(node, _element_tag("controlledSubjectAreaName")).text = controlled
+        if additional:
+            ET.SubElement(node, _element_tag("additionalSubjectAreaName")).text = additional
 
-    resource = ET.SubElement(root, _element_tag("resource"), {"resourceType": "Dataset"})
-    resource.text = dataset.get("title") or dataset.get("name") or "CKAN dataset"
+    resource = ET.SubElement(root, _element_tag("resource"), {"resourceType": data["resource_type"]})
+    resource.text = data["resource"]
+    _append_geo_locations(root, data["geo_locations"])
+    _append_simple_typed_list(root, "dataSources", "dataSource", data["data_sources"], "dataSourceDetail")
+    _append_software(root, data["software"])
+    _append_text_list(root, "processing", "dataProcessing", data["data_processing"])
 
     rights_node = ET.SubElement(root, _element_tag("rights"))
-    ET.SubElement(rights_node, _element_tag("controlledRights")).text = rights or "Other"
+    ET.SubElement(rights_node, _element_tag("controlledRights")).text = data["rights"]
+    if data["additional_rights"]:
+        ET.SubElement(rights_node, _element_tag("additionalRights")).text = data["additional_rights"]
 
     rights_holders = ET.SubElement(root, _element_tag("rightsHolders"))
-    ET.SubElement(rights_holders, _element_tag("rightsHolder")).text = (
-        dataset.get("organization", {}).get("title")
-        if isinstance(dataset.get("organization"), dict)
-        else None
-    ) or publisher or author
+    for holder in data["rights_holders"]:
+        ET.SubElement(rights_holders, _element_tag("rightsHolder")).text = holder
+
+    related_information = _container(root, "relatedInformations", data["related_information"])
+    if related_information is not None:
+        for item in data["related_information"]:
+            attributes = {"relatedInformationType": item.get("type", "")} if item.get("type") else {}
+            ET.SubElement(related_information, _element_tag("relatedInformation"), attributes).text = item["value"]
+    _append_funding(root, data["funding_references"])
+    if data["version"]:
+        ET.SubElement(root, _element_tag("version")).text = data["version"]
 
     xml_body = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     return xml_body
+
+
+def _container(root, name, values):
+    return ET.SubElement(root, _element_tag(name)) if values else None
+
+
+def _append_person(node, item, prefix):
+    name = item.get("name") or ", ".join(part for part in (item.get("family_name"), item.get("given_name")) if part)
+    ET.SubElement(node, _element_tag(prefix + "Name")).text = name
+    if item.get("given_name"):
+        ET.SubElement(node, _element_tag("givenName")).text = item["given_name"]
+    if item.get("family_name"):
+        ET.SubElement(node, _element_tag("familyName")).text = item["family_name"]
+    if item.get("orcid"):
+        ET.SubElement(node, _element_tag("nameIdentifier"), {"nameIdentifierScheme": "ORCID", "schemeURI": "https://orcid.org/"}).text = item["orcid"]
+    if item.get("affiliation"):
+        attributes = {}
+        if item.get("affiliation_ror"):
+            attributes = {"affiliationIdentifierScheme": "ROR", "schemeURI": "https://ror.org/", "affiliationIdentifier": item["affiliation_ror"]}
+        ET.SubElement(node, _element_tag(prefix + "Affiliation"), attributes).text = item["affiliation"]
+
+
+def _append_identifier_list(root, container_name, element_name, values, attribute_name, source_name):
+    container = _container(root, container_name, values)
+    if container is not None:
+        for item in values:
+            ET.SubElement(container, _element_tag(element_name), {attribute_name: item[source_name]}).text = item["value"]
+
+
+def _append_simple_typed_list(root, container_name, element_name, values, attribute_name):
+    container = _container(root, container_name, values)
+    if container is not None:
+        for item in values:
+            ET.SubElement(container, _element_tag(element_name), {attribute_name: item["type"]}).text = item["value"]
+
+
+def _append_text_list(root, container_name, element_name, values):
+    container = _container(root, container_name, values)
+    if container is not None:
+        for value in values:
+            ET.SubElement(container, _element_tag(element_name)).text = value.get("value") if isinstance(value, dict) else value
+
+
+def _append_geo_locations(root, values):
+    container = _container(root, "geoLocations", values)
+    if container is None:
+        return
+    for item in values:
+        location = ET.SubElement(container, _element_tag("geoLocation"))
+        if item.get("country"):
+            ET.SubElement(location, _element_tag("geoLocationCountry")).text = item["country"]
+        if item.get("region"):
+            ET.SubElement(location, _element_tag("geoLocationRegion")).text = item["region"]
+        if item.get("latitude") not in (None, "") and item.get("longitude") not in (None, ""):
+            point = ET.SubElement(location, _element_tag("geoLocationPoint"))
+            ET.SubElement(point, _element_tag("latitude")).text = str(item["latitude"])
+            ET.SubElement(point, _element_tag("longitude")).text = str(item["longitude"])
+
+
+def _append_software(root, values):
+    container = _container(root, "software", values)
+    if container is None:
+        return
+    for item in values:
+        software_type = ET.SubElement(container, _element_tag("softwareType"), {"type": item["type"]})
+        ET.SubElement(software_type, _element_tag("softwareName"), {"softwareVersion": item["version"]}).text = item["name"]
+        if item.get("alternative_name"):
+            ET.SubElement(software_type, _element_tag("alternativeSoftwareName"), {"alternativeSoftwareVersion": item.get("alternative_version", "")}).text = item["alternative_name"]
+
+
+def _append_funding(root, values):
+    container = _container(root, "fundingReferences", values)
+    if container is None:
+        return
+    for item in values:
+        funding = ET.SubElement(container, _element_tag("fundingReference"))
+        ET.SubElement(funding, _element_tag("funderName")).text = item["funder_name"]
+        if item.get("funder_identifier"):
+            attributes = {"type": item["funder_identifier_type"]}
+            if item.get("funder_scheme_uri"):
+                attributes["schemeURI"] = item["funder_scheme_uri"]
+            ET.SubElement(funding, _element_tag("funderIdentifier"), attributes).text = item["funder_identifier"]
+        for source, element in (("award_number", "awardNumber"), ("award_uri", "awardURI"), ("award_title", "awardTitle")):
+            if item.get(source):
+                ET.SubElement(funding, _element_tag(element)).text = item[source]
+
+
+def _attributes(item, pairs):
+    return {target: item[source] for source, target in pairs if item.get(source)}
 
 
 def validate_radar_metadata_xml(metadata_xml, xsd_path=None):
@@ -698,32 +810,6 @@ def _dataset_tag(name):
 
 def _element_tag(name):
     return "{{{}}}{}".format(RADAR_ELEMENTS_NS, name)
-
-
-def _metadata_identifier(dataset, identifier_prefix):
-    # The v9.3 XSD requires a DOI-shaped identifier before RADAR has assigned
-    # the real DOI. Keep this explicitly provisional and independent of CKAN IDs.
-    return "{}/radar-pending-assignment".format(identifier_prefix.rstrip("/"))
-
-
-def _production_year(dataset):
-    for field in ("production_year", "publication_year", "year"):
-        value = dataset.get(field)
-        if value:
-            return str(value)
-    metadata_created = dataset.get("metadata_created")
-    if metadata_created:
-        return str(metadata_created)[:4]
-    return "unknown"
-
-
-def _language(dataset):
-    value = dataset.get("language") or dataset.get("lang")
-    if not value:
-        return ""
-    value = str(value).lower()
-    mapping = {"en": "eng", "de": "deu"}
-    return mapping.get(value, value)
 
 
 def _resource_file_path(storage_path, resource_id):

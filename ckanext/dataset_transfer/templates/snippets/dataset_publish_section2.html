@@ -13,9 +13,10 @@
     </div>
     <div class="row">
         <div class="col-sm-12">
-            <h3>
+            <h3 class="luh-only">
                 {{_('Your dataset will get published in this organization: ')}} <strong>{{h.get_org_name()}}</strong>
             </h3>
+            <h3 class="radar-only">{{ _('Review the RADAR terms and conditions') }}</h3>
         </div>
     </div>
     <br><hr>
@@ -37,8 +38,9 @@
         </div>
         <div class="col-sm-12">
               <label class="checkbox-container">
-                {{_('I am agree to the terms of usage. More details under ')}}
-                <a href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen" target="_blank">
+                <span class="luh-only">{{_('I agree to the terms of usage. More details under ')}}</span>
+                <span class="radar-only">{{_('I agree to the applicable RADAR terms of usage.')}}</span>
+                <a class="luh-only" href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen" target="_blank">
                     Conditions and Terms of usage
                 </a>
                 <input type="checkbox" 
@@ -51,8 +53,8 @@
         </div>
         <div class="col-sm-12">
               <label class="checkbox-container">
-                {{_('I am sure that the saved research data is free of third party rights. Example: personal data. Read more on the ')}}
-                <a href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen" target="_blank"> 
+                {{_('I am sure that the saved research data is free of conflicting third party rights, including personal-data restrictions.')}}
+                <a class="luh-only" href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen" target="_blank">
                     Conditions and Terms of usage
                 </a>
                 <input type="checkbox" 

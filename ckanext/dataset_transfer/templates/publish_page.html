@@ -37,6 +37,7 @@
     </div>
     <br>
     {% snippet "snippets/dataset_publish_section1.html", macro=macro %}
+    {% snippet "snippets/radar_metadata_review.html", radar_metadata=radar_metadata, radar_vocabularies=radar_vocabularies %}
     {% snippet "snippets/dataset_publish_section2.html" %}
     {% snippet "snippets/dataset_publish_section3.html", pkg_dict=pkg_dict %}
     {% snippet "snippets/dataset_publish_result_section.html", pkg_dict=pkg_dict %}
@@ -44,6 +45,7 @@
         <br><hr>
         <div class="col-sm-12">
             <a href="{{h.url_for('dataset.read', id=pkg_dict['name'],  _external=True)}}" id="dataset_transfer_cancel_btn" type="button" class="btn btn-danger pull-left">{{_('Cancel Publish')}}</a>
+            <button id="dataset_transfer_back_btn" class="btn btn-default pull-left" type="button">{{_('Back')}}</button>
             <button id="dataset_transfer_next_btn" class="btn btn-primary pull-right org_should_exist" step="2">{{_('Next')}}</button>
             <button type="submit" id="dataset_transfer_submit" class="btn btn-success pull-right org_should_exist" step="2">{{_('Publish')}}</button>  
         </div>
