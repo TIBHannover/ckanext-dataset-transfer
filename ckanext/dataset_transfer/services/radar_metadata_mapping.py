@@ -9,9 +9,9 @@ from xml.etree import ElementTree as ET
 
 
 SUBJECT_AREAS = (
-    "Agriculture", "Architecture", "Arts and Media", "Astrophysics and Astronomy",
+    "Engineering", "Agriculture", "Architecture", "Arts and Media", "Astrophysics and Astronomy",
     "Biochemistry", "Biology", "Behavioural Sciences", "Chemistry", "Computer Science",
-    "Economics", "Engineering", "Environmental Science and Ecology", "Ethnology",
+    "Economics", "Environmental Science and Ecology", "Ethnology",
     "Geological Science", "Geography", "History", "Horticulture",
     "Information Technology", "Linguistics", "Life Science", "Materials Science",
     "Mathematics", "Medicine", "Philosophy", "Physics", "Psychology",
@@ -164,6 +164,11 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
     subject_areas = _structured_list(source, "subject_area") or _structured_list(source, "subject_areas")
     subject_areas = [_text(item.get("value") if isinstance(item, dict) else item) for item in subject_areas]
     subject_areas = [value for value in subject_areas if value in SUBJECT_AREAS]
+    # Use the exact RADAR vocabulary value as the initial primary subject area.
+    # Researchers can remove, reorder, or supplement it in the review form.
+    subject_areas = ["Engineering"] + [
+        value for value in subject_areas if value != "Engineering"
+    ]
     resource_type = _text(source.get("resource_type"))
     if resource_type not in RESOURCE_TYPES:
         resource_type = "Dataset"
