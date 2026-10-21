@@ -108,6 +108,23 @@
   padding: 8px 12px;
 }
 
+.radar-confirmation-table th {
+  width: 175px;
+}
+
+.radar-confirmation-table td {
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.radar-confirmation-table .radar-confirmation-group th {
+  background: #d9edf7;
+  color: #245269;
+  font-size: 16px;
+  padding-top: 12px;
+  width: auto;
+}
+
 
 #final_action_buttons{
     display: none;

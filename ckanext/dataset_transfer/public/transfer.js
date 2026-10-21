@@ -350,17 +350,109 @@ function validate_radar_metadata_in_browser(metadata){
 
 function render_radar_confirmation(metadata){
     let body = $('#radar_confirmation_body').empty();
-    let rows = [
-        ['Title', metadata.title],
-        ['Creators', $.map(metadata.creators, function(item){ return item.name || [item.family_name, item.given_name].filter(Boolean).join(', '); }).join('; ')],
-        ['Production Year', metadata.production_year],
-        ['Subject Areas', $.map(metadata.subject_areas, function(item){ return item.controlled + (item.additional ? ': ' + item.additional : ''); }).join('; ')],
-        ['Resource Type', metadata.resource_type],
-        ['Licence', metadata.rights],
-        ['Publishers', $.map(metadata.publishers, function(item){ return item.name; }).join('; ')],
-        ['Rights Holders', $.map(metadata.rights_holders, function(item){ return item.name; }).join('; ')]
-    ];
-    $.each(rows, function(_, row){ body.append($('<tr></tr>').append($('<th></th>').text(row[0])).append($('<td></td>').text(row[1]))); });
+    append_radar_confirmation_group(body, 'Dataset Information');
+    append_radar_confirmation_row(body, 'Identifier', 'Assigned by RADAR after transfer');
+    append_radar_confirmation_row(body, 'Title', metadata.title);
+    append_radar_confirmation_row(body, 'Additional Titles', format_radar_items(metadata.additional_titles, function(item){ return item.value + ' (' + item.type + ')'; }));
+    append_radar_confirmation_row(body, 'Descriptions', format_radar_items(metadata.descriptions, function(item){ return item.type + ': ' + item.value; }));
+    append_radar_confirmation_row(body, 'Production Year', metadata.production_year);
+    append_radar_confirmation_row(body, 'Publication Year', 'Managed by RADAR');
+    append_radar_confirmation_row(body, 'Resource Type', metadata.resource_type);
+    append_radar_confirmation_row(body, 'Resource Description', metadata.resource);
+    append_radar_confirmation_row(body, 'Version', metadata.version);
+
+    append_radar_confirmation_group(body, 'Creators and Contributors');
+    append_radar_confirmation_row(body, 'Creators', format_radar_items(metadata.creators, format_radar_person));
+    append_radar_confirmation_row(body, 'Contributors', format_radar_items(metadata.contributors, function(item){
+        return format_radar_person(item) + (item.type ? ' | Role: ' + item.type : '');
+    }));
+
+    append_radar_confirmation_group(body, 'Classification and Keywords');
+    append_radar_confirmation_row(body, 'Subject Areas', format_radar_items(metadata.subject_areas, function(item){ return item.controlled + (item.additional ? ': ' + item.additional : ''); }));
+    append_radar_confirmation_row(body, 'Keywords', format_radar_items(metadata.keywords, function(item){
+        return format_radar_details(item.value, [
+            ['Scheme', item.scheme], ['Scheme URI', item.scheme_uri],
+            ['Value URI', item.value_uri], ['Classification Code', item.classification_code],
+            ['Ontology URI', item.ontology_uri], ['Ontology ID', item.ontology_id]
+        ]);
+    }));
+    append_radar_confirmation_row(body, 'Language', metadata.language);
+
+    append_radar_confirmation_group(body, 'Rights and Publication');
+    append_radar_confirmation_row(body, 'Publishers', format_radar_items(metadata.publishers, format_radar_organization));
+    append_radar_confirmation_row(body, 'Licence', metadata.rights);
+    append_radar_confirmation_row(body, 'Additional Rights Statement', metadata.additional_rights);
+    append_radar_confirmation_row(body, 'Rights Holders', format_radar_items(metadata.rights_holders, format_radar_organization));
+
+    if(metadata.funding_references.length){
+        append_radar_confirmation_group(body, 'Funding References');
+        append_radar_confirmation_row(body, 'Funding', format_radar_items(metadata.funding_references, function(item){
+            return format_radar_details(item.funder_name, [
+                ['Funder Identifier', item.funder_identifier], ['Identifier Type', item.funder_identifier_type],
+                ['Scheme URI', item.funder_scheme_uri], ['Award Number', item.award_number],
+                ['Award URI', item.award_uri], ['Project Title', item.award_title]
+            ]);
+        }));
+    }
+
+    let hasAdditionalMetadata = metadata.alternate_identifiers.length || metadata.related_identifiers.length ||
+        metadata.data_sources.length || metadata.software.length || metadata.data_processing.length ||
+        metadata.related_information.length;
+    if(hasAdditionalMetadata){
+        append_radar_confirmation_group(body, 'Additional Research Metadata');
+        append_radar_confirmation_row(body, 'Alternate Identifiers', format_radar_items(metadata.alternate_identifiers, function(item){ return item.value + ' (' + item.type + ')'; }));
+        append_radar_confirmation_row(body, 'Related Identifiers', format_radar_items(metadata.related_identifiers, function(item){ return format_radar_details(item.value, [['Identifier Type', item.identifier_type], ['Relation Type', item.relation_type]]); }));
+        append_radar_confirmation_row(body, 'Data Sources', format_radar_items(metadata.data_sources, function(item){ return item.value + ' (' + item.type + ')'; }));
+        append_radar_confirmation_row(body, 'Software Information', format_radar_items(metadata.software, function(item){ return format_radar_details(item.name, [['Version', item.version], ['Purpose', item.type], ['Alternative Name', item.alternative_name], ['Alternative Version', item.alternative_version]]); }));
+        append_radar_confirmation_row(body, 'Data Processing', (metadata.data_processing || []).join('\n'));
+        append_radar_confirmation_row(body, 'Related Information', format_radar_items(metadata.related_information, function(item){ return format_radar_details(item.value, [['Type', item.type]]); }));
+    }
+}
+
+function append_radar_confirmation_group(body, title){
+    body.append($('<tr class="radar-confirmation-group"></tr>').append($('<th colspan="2"></th>').text(title)));
+}
+
+function append_radar_confirmation_row(body, label, value){
+    value = clean_value(value);
+    if(!value){ return; }
+    body.append(
+        $('<tr></tr>')
+            .append($('<th scope="row"></th>').text(label))
+            .append($('<td></td>').text(value))
+    );
+}
+
+function format_radar_items(items, formatter){
+    return $.map(items || [], function(item){
+        return clean_value(formatter(item));
+    }).filter(Boolean).join('\n');
+}
+
+function format_radar_person(item){
+    let name = item.name || [item.family_name, item.given_name].filter(Boolean).join(', ');
+    return format_radar_details(name, [
+        ['Given Name', item.given_name], ['Family Name', item.family_name],
+        ['ORCID', item.orcid], ['Affiliation', item.affiliation],
+        ['Affiliation ROR', item.affiliation_ror]
+    ]);
+}
+
+function format_radar_organization(item){
+    return format_radar_details(item.name, [
+        ['Name Identifier', item.name_identifier],
+        ['Identifier Scheme', item.name_identifier_scheme],
+        ['Scheme URI', item.scheme_uri]
+    ]);
+}
+
+function format_radar_details(primary, details){
+    let values = [];
+    if(clean_value(primary)){ values.push(clean_value(primary)); }
+    $.each(details, function(_, detail){
+        if(clean_value(detail[1])){ values.push(detail[0] + ': ' + clean_value(detail[1])); }
+    });
+    return values.join(' | ');
 }
 
 function clear_radar_validation_errors(){
