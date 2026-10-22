@@ -74,6 +74,11 @@ PROJECT_FUNDING_DEFAULTS = {
     "SFB1368": "oxygen-free production",
     "TRR375": "Multifunctional High-Performance Components made of hybrid porous materials",
 }
+FIXED_RESOURCE_TYPE = "Dataset"
+FIXED_SUBJECT_AREA = "Engineering"
+DFG_FUNDER_NAME = "Deutsche Forschungsgemeinschaft (DFG)"
+DFG_ROR = "https://ror.org/018mejw64"
+DFG_ROR_SCHEME_URI = "https://ror.org/"
 def _language_vocabulary():
     path = Path(__file__).resolve().parent.parent / "schemas" / "radar" / "v9.3" / "RadarTypes.xsd"
     namespace = {"xs": "http://www.w3.org/2001/XMLSchema", "dc": "http://purl.org/dc/elements/1.1/"}
@@ -139,7 +144,7 @@ ALLOWED_FIELDS = LIST_FIELDS | SCALAR_FIELDS
 
 
 def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
-                      dfg_award_number=None, reference_related_identifiers=None):
+                      dfg_award_number=None, reference_descriptions=None):
     source = copy.deepcopy(dataset or {})
     organization = source.get("organization") if isinstance(source.get("organization"), dict) else {}
     organization_title = _text(organization.get("title"))
@@ -177,13 +182,11 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
     subject_areas = [value for value in subject_areas if value in SUBJECT_AREAS]
     # Use the exact RADAR vocabulary value as the initial primary subject area.
     # Researchers can remove, reorder, or supplement it in the review form.
-    subject_areas = ["Engineering"] + [
-        value for value in subject_areas if value != "Engineering"
+    subject_areas = [FIXED_SUBJECT_AREA] + [
+        value for value in subject_areas if value != FIXED_SUBJECT_AREA
     ]
-    resource_type = _text(source.get("resource_type"))
-    if resource_type not in RESOURCE_TYPES:
-        resource_type = "Dataset"
-    rights = LICENSE_MAP.get(_text(source.get("license_id")).lower(), "")
+    resource_type = FIXED_RESOURCE_TYPE
+    rights = mapped_ckan_rights(source)
     keywords = []
     structured_keywords = _structured_list(source, "keywords")
     if structured_keywords:
@@ -218,6 +221,7 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
             technical.append("Material combination: {}".format(_text(resource.get("material_combination"))))
         if technical:
             descriptions.append({"value": "; ".join(technical), "type": "TechnicalInfo"})
+    descriptions = _merge_descriptions(descriptions, reference_descriptions or [])
 
     # CKAN creation time is only a review-form suggestion; an explicit research
     # production year always wins and the submitted review value remains editable.
@@ -234,10 +238,10 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
     funding_references = [
         _normalize_funding(item) for item in funding_references if isinstance(item, dict)
     ]
-    if not funding_references:
-        default_funding = project_funding_default(project_id, dfg_award_number)
-        if default_funding:
-            funding_references = [default_funding]
+    funding_references = _merge_funding_references(
+        project_funding_default(project_id, dfg_award_number),
+        funding_references,
+    )
 
     rights_holders = (
         _structured_list(source, "rights_holders")
@@ -253,10 +257,6 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
         for item in _structured_list(source, "related_identifiers")
         if isinstance(item, dict)
     ]
-    related_identifiers = _merge_related_identifiers(
-        related_identifiers,
-        reference_related_identifiers or [],
-    )
 
     return {
         "title": _text(source.get("title") or source.get("name")),
@@ -318,6 +318,74 @@ def normalize_reviewed_metadata(value):
     return normalized
 
 
+def apply_fixed_radar_metadata(metadata, dataset, project_id=None,
+                               dfg_award_number=None,
+                               reference_descriptions=None):
+    """Reapply server-controlled RADAR values to reviewed browser metadata."""
+    data = normalize_reviewed_metadata(metadata)
+    data["resource_type"] = FIXED_RESOURCE_TYPE
+    data["rights"] = mapped_ckan_rights(dataset)
+    data["additional_rights"] = ""
+
+    additional_subjects = []
+    seen_subjects = {(FIXED_SUBJECT_AREA.casefold(), "")}
+    for area in data["subject_areas"]:
+        normalized_area = _normalize_subject_area(area)
+        controlled = normalized_area["controlled"]
+        key = (controlled.casefold(), normalized_area["additional"].casefold())
+        if controlled == FIXED_SUBJECT_AREA or key in seen_subjects:
+            continue
+        seen_subjects.add(key)
+        additional_subjects.append(normalized_area)
+    data["subject_areas"] = [
+        {"controlled": FIXED_SUBJECT_AREA, "additional": ""}
+    ] + additional_subjects
+
+    data["funding_references"] = _merge_funding_references(
+        project_funding_default(project_id, dfg_award_number),
+        data["funding_references"],
+    )
+    data["descriptions"] = _merge_descriptions(
+        data["descriptions"], reference_descriptions or []
+    )
+    return data
+
+
+def fixed_radar_metadata_errors(dataset, project_id=None,
+                                dfg_award_number=None):
+    """Return configuration/source errors for fields fixed by server policy."""
+    errors = []
+    license_id = _text((dataset or {}).get("license_id"))
+    if not mapped_ckan_rights(dataset):
+        message = (
+            "The CKAN dataset licence is not specified. Update the licence in "
+            "CKAN before transferring to RADAR."
+            if license_id.lower() == "notspecified" or not license_id
+            else "The CKAN dataset licence is not supported by RADAR. Update the licence in CKAN before transferring."
+        )
+        _error(errors, "rights", message)
+
+    normalized_project = normalize_project_id(project_id)
+    if not normalized_project:
+        _error(
+            errors,
+            "funding_references",
+            "Configure CKANEXT__CRC__PROJECT__ID with SFB1153, SFB1368, or TRR375 before transferring to RADAR.",
+        )
+    award_number = _text(dfg_award_number)
+    if not award_number or award_number == "12345":
+        _error(
+            errors,
+            "funding_references",
+            "Configure a verified DFG project number in CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER before transferring to RADAR.",
+        )
+    return errors
+
+
+def mapped_ckan_rights(dataset):
+    return LICENSE_MAP.get(_text((dataset or {}).get("license_id")).lower(), "")
+
+
 def validate_radar_metadata(metadata):
     data = normalize_reviewed_metadata(metadata)
     errors = []
@@ -334,8 +402,8 @@ def validate_radar_metadata(metadata):
         _error(errors, "production_year", "Use YYYY, YYYY-YYYY, or unknown.")
     if data["publication_year"] and not re.match(r"^\d{4}$", data["publication_year"]):
         _error(errors, "publication_year", "Publication year must use YYYY.")
-    if data["resource_type"] and data["resource_type"] not in RESOURCE_TYPES:
-        _error(errors, "resource_type", "Please select a valid RADAR resource type.")
+    if data["resource_type"] != FIXED_RESOURCE_TYPE:
+        _error(errors, "resource_type", "RADAR resource type must be Dataset.")
     if data["rights"] and data["rights"] not in RIGHTS:
         _error(errors, "rights", "Please select a valid RADAR licence.")
     if data["rights"] == "Other" and not data["additional_rights"]:
@@ -373,6 +441,11 @@ def validate_radar_metadata(metadata):
             _error(errors, "subject_areas.{}".format(index), "Please select a valid RADAR subject area.")
         if controlled == "Other" and not additional:
             _error(errors, "subject_areas.{}.additional".format(index), "Please specify the additional subject area.")
+    if not any(
+        area.get("controlled") == FIXED_SUBJECT_AREA
+        for area in data["subject_areas"] if isinstance(area, dict)
+    ):
+        _error(errors, "subject_areas", "Engineering is required as the primary RADAR subject area.")
     if data["language"] and data["language"] not in dict(LANGUAGES):
         _error(errors, "language", "Please select a valid RADAR language code.")
     for index, item in enumerate(data["additional_titles"]):
@@ -421,6 +494,8 @@ def validate_radar_metadata(metadata):
             _error(errors, "funding_references.{}.funder_identifier_type".format(index), "Please select a valid funder identifier type.")
         if item.get("funder_identifier_type") == "ROR" and item.get("funder_identifier") and not re.match(r"^(https://ror\.org/)?0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$", item["funder_identifier"], re.I):
             _error(errors, "funding_references.{}.funder_identifier".format(index), "Please provide a valid funder ROR identifier.")
+        if item.get("funder_identifier_type") == "ROR" and item.get("funder_identifier") and item.get("funder_scheme_uri") != DFG_ROR_SCHEME_URI:
+            _error(errors, "funding_references.{}.funder_scheme_uri".format(index), "ROR funders must use https://ror.org/ as the scheme URI.")
         # The development placeholder must never silently become RADAR metadata.
         if item.get("award_number") == "12345":
             _error(errors, "funding_references.{}.award_number".format(index), "Replace or remove the temporary testing award number 12345 before transfer.")
@@ -611,7 +686,7 @@ def _extra_value(container, key):
 
 
 def _normalize_funding(item):
-    return {
+    normalized = {
         "funder_name": _text(item.get("funder_name") or item.get("funderName")),
         "funder_identifier": _text(item.get("funder_identifier") or item.get("funderIdentifier")),
         "funder_identifier_type": _text(item.get("funder_identifier_type") or item.get("funderIdentifierType")),
@@ -620,6 +695,11 @@ def _normalize_funding(item):
         "award_uri": _text(item.get("award_uri") or item.get("awardURI")),
         "award_title": _text(item.get("award_title") or item.get("awardTitle")),
     }
+    if item.get("fixed"):
+        normalized["fixed"] = True
+    if item.get("project_id"):
+        normalized["project_id"] = _text(item.get("project_id"))
+    return normalized
 
 
 def _normalize_subject_area(item):
@@ -718,15 +798,61 @@ def project_funding_default(project_id, award_number=None):
         return None
     configured_award = _text(award_number)
     return {
-        "funder_name": "Deutsche Forschungsgemeinschaft (DFG)",
-        "funder_identifier": "",
-        "funder_identifier_type": "",
-        "funder_scheme_uri": "",
-        "award_number": configured_award or "12345",
+        "funder_name": DFG_FUNDER_NAME,
+        "funder_identifier": DFG_ROR,
+        "funder_identifier_type": "ROR",
+        "funder_scheme_uri": DFG_ROR_SCHEME_URI,
+        "award_number": configured_award,
         "award_uri": "",
         "award_title": title,
-        "temporary_award_number": not bool(configured_award),
+        "project_id": normalized_id,
+        "fixed": True,
     }
+
+
+def _merge_funding_references(primary, additional):
+    merged = [primary] if primary else []
+    for raw_item in additional or []:
+        if not isinstance(raw_item, dict):
+            continue
+        item = _normalize_funding(raw_item)
+        if not item["funder_name"]:
+            continue
+        if primary and _same_funding_reference(primary, item):
+            continue
+        merged.append(item)
+    return merged
+
+
+def _same_funding_reference(left, right):
+    left_award = _text(left.get("award_number")).casefold()
+    right_award = _text(right.get("award_number")).casefold()
+    if left_award and right_award and left_award == right_award:
+        return True
+    left_title = _text(left.get("award_title")).casefold()
+    right_title = _text(right.get("award_title")).casefold()
+    return bool(left_title and right_title and left_title == right_title)
+
+
+def _merge_descriptions(existing, imported):
+    merged = []
+    seen = set()
+    for raw_item in list(existing or []) + list(imported or []):
+        if not isinstance(raw_item, dict):
+            continue
+        item = _normalize_object(raw_item, ("value", "type"))
+        if not item["value"]:
+            continue
+        key = (item["type"].casefold(), " ".join(item["value"].split()).casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        if raw_item.get("fixed"):
+            item["fixed"] = True
+        if raw_item.get("source"):
+            item["source"] = _text(raw_item.get("source"))
+        merged.append(item)
+    return merged
 
 
 def _normalize_language(value):

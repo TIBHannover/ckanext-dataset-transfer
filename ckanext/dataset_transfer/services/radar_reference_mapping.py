@@ -2,6 +2,7 @@
 
 import logging
 import re
+from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
 from ckan.model import meta
@@ -33,8 +34,8 @@ def normalize_doi(value):
     return value if DOI_PATTERN.match(value) else ""
 
 
-def get_ckan_related_identifiers(dataset):
-    """Load dataset-reference rows and map them to RADAR related identifiers."""
+def get_ckan_reference_descriptions(dataset):
+    """Load dataset-reference rows as RADAR ``Description/Other`` entries."""
     package_name = _text((dataset or {}).get("name"))
     if not package_name:
         log.warning("RADAR reference mapping skipped: CKAN dataset name is missing")
@@ -52,6 +53,10 @@ def get_ckan_related_identifiers(dataset):
                 package_name,
             )
             return []
+        log.exception(
+            "RADAR reference mapping import failed package_name=%s",
+            package_name,
+        )
         raise
 
     try:
@@ -64,6 +69,10 @@ def get_ckan_related_identifiers(dataset):
                 package_name,
             )
             return []
+        log.exception(
+            "RADAR reference mapping query failed package_name=%s",
+            package_name,
+        )
         raise
 
     # The extension returns sqlalchemy.sql.expression.false (the function)
@@ -71,30 +80,116 @@ def get_ckan_related_identifiers(dataset):
     if not isinstance(references, (list, tuple)):
         return []
 
-    related_identifiers = []
+    descriptions = []
+    seen = set()
     for reference in references:
-        doi = normalize_doi(getattr(reference, "doi", ""))
-        url = _text(getattr(reference, "url", ""))
-        if doi:
-            related_identifiers.append({
-                "value": doi,
-                "identifier_type": "DOI",
-                "relation_type": "",
-            })
-        elif _valid_http_url(url):
-            related_identifiers.append({
-                "value": url,
-                "identifier_type": "URL",
-                "relation_type": "",
-            })
-        else:
+        description = _reference_description(reference)
+        if not description:
             log.warning(
-                "RADAR reference skipped package_name=%s reference_id=%s title=%r reason=no_valid_identifier",
+                "RADAR reference skipped package_name=%s reference_id=%s title=%r reason=no_usable_metadata",
                 package_name,
                 getattr(reference, "id", None),
                 getattr(reference, "title", "") or "",
             )
-    return related_identifiers
+            continue
+        doi = normalize_doi(getattr(reference, "doi", ""))
+        url = _text(getattr(reference, "url", ""))
+        reference_id = getattr(reference, "id", None)
+        duplicate_key = (
+            ("doi", doi.casefold()) if doi
+            else ("url", url.casefold()) if _valid_http_url(url)
+            else ("id", str(reference_id)) if reference_id is not None
+            else ("description", description.casefold())
+        )
+        if duplicate_key in seen:
+            continue
+        seen.add(duplicate_key)
+        descriptions.append({
+            "value": description,
+            "type": "Other",
+            "source": "dataset_reference",
+            "source_reference_id": getattr(reference, "id", None),
+            "fixed": True,
+        })
+    return descriptions
+
+
+def _reference_description(reference):
+    doi = normalize_doi(getattr(reference, "doi", ""))
+    url = _text(getattr(reference, "url", ""))
+    identifier = "doi:{}".format(doi) if doi else url if _valid_http_url(url) else ""
+
+    # Keep the requested bibliographic order and omit absent values rather than
+    # manufacturing empty publication metadata.
+    structured = [
+        _plain_text(getattr(reference, "authors", "")),
+        _plain_text(getattr(reference, "year", "")),
+        _plain_text(
+            getattr(reference, "journal", "")
+            or getattr(reference, "proceeding", "")
+        ),
+        _plain_text(getattr(reference, "volume", "")),
+        _plain_text(
+            getattr(reference, "page", "")
+            or getattr(reference, "issue", "")
+        ),
+    ]
+    structured = [value for value in structured if value]
+    if structured:
+        if identifier and not _contains_identifier("|".join(structured), doi, url):
+            structured.append(identifier)
+        return "Related Article: {}".format("|".join(structured))
+
+    citation = _plain_text(getattr(reference, "citation", ""))
+    if citation:
+        result = "Related Article: {}".format(citation)
+        if identifier and not _contains_identifier(citation, doi, url):
+            result += " | {}".format(identifier)
+        return result
+
+    title = _plain_text(getattr(reference, "title", ""))
+    values = [value for value in (title, identifier) if value]
+    return "Related Article: {}".format(" | ".join(values)) if values else ""
+
+
+def _contains_identifier(value, doi, url):
+    normalized = value.casefold()
+    return bool(
+        (doi and doi.casefold() in normalized)
+        or (url and url.casefold() in normalized)
+    )
+
+
+class _PlainTextParser(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=True)
+        self.parts = []
+        self.ignored_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in ("script", "style"):
+            self.ignored_depth += 1
+        elif tag in ("br", "div", "li", "p") and not self.ignored_depth:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in ("script", "style") and self.ignored_depth:
+            self.ignored_depth -= 1
+        elif tag in ("div", "li", "p") and not self.ignored_depth:
+            self.parts.append(" ")
+
+    def handle_data(self, data):
+        if not self.ignored_depth:
+            self.parts.append(data)
+
+
+def _plain_text(value):
+    parser = _PlainTextParser()
+    parser.feed(_text(value))
+    parser.close()
+    return " ".join("".join(parser.parts).split())
 
 
 def _valid_http_url(value):

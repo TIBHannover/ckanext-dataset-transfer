@@ -247,9 +247,6 @@ $(document).ready(function(){
      $(document).on('change', '.radar-rights-holder-scheme', function(){
         update_rights_holder_scheme($(this).closest('.radar-rights-holder-row'));
      });
-     $(document).on('input', '.radar-award-number', function(){
-        $(this).closest('.radar-row').find('.radar-funding-warning').toggle(clean_value($(this).val()) === '12345');
-     });
      $('.radar-publisher-row').each(function(){ update_publisher_scheme($(this)); });
      $('.radar-rights-holder-row').each(function(){ update_rights_holder_scheme($(this)); });
 
@@ -347,6 +344,14 @@ function validate_radar_metadata_in_browser(metadata){
     });
     if(!metadata.production_year){ errors.push({field: 'production_year', message: 'Please provide the production year.'}); }
     if(!metadata.subject_areas.length){ errors.push({field: 'subject_areas', message: 'Please select a scientific subject area.'}); }
+    let subjectAreas = {};
+    $.each(metadata.subject_areas, function(index, area){
+        let key = (area.controlled + '|' + area.additional).toLowerCase();
+        if(subjectAreas[key]){ errors.push({field: 'subject_areas.' + index, message: 'Please remove duplicate subject areas.'}); }
+        subjectAreas[key] = true;
+    });
+    if(!subjectAreas['engineering|']){ errors.push({field: 'subject_areas', message: 'Engineering is required as a subject area.'}); }
+    if(metadata.resource_type !== 'Dataset'){ errors.push({field: 'resource_type', message: 'RADAR resource type must be Dataset.'}); }
     if(!metadata.publishers.length || !metadata.publishers[0].name){ errors.push({field: 'publishers', message: 'Please provide a publisher.'}); }
     if(!metadata.rights){ errors.push({field: 'rights', message: 'Please select a licence.'}); }
     if(!metadata.rights_holders.length){ errors.push({field: 'rights_holders', message: 'Please provide a rights holder.'}); }

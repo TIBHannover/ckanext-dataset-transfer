@@ -18,12 +18,14 @@ from ckanext.dataset_transfer.services.radar import (
 )
 from ckanext.dataset_transfer.services.radar_metadata_mapping import (
     VOCABULARIES,
+    apply_fixed_radar_metadata,
+    fixed_radar_metadata_errors,
     map_ckan_to_radar,
     normalize_reviewed_metadata,
     validate_radar_metadata,
 )
 from ckanext.dataset_transfer.services.radar_reference_mapping import (
-    get_ckan_related_identifiers,
+    get_ckan_reference_descriptions,
 )
 from datetime import datetime as _time
 
@@ -74,12 +76,13 @@ class BaseController():
         award_number = toolkit.config.get(
             "ckanext.dataset_transfer.radar.dfg_award_number"
         ) or os.environ.get("CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER")
+        reference_descriptions = get_ckan_reference_descriptions(package)
         radar_metadata = map_ckan_to_radar(
             package,
             configured_publisher,
             project_id=project_id,
             dfg_award_number=award_number,
-            reference_related_identifiers=get_ckan_related_identifiers(package),
+            reference_descriptions=reference_descriptions,
         )
         return render_template(
             'publish_page.html',
@@ -87,6 +90,9 @@ class BaseController():
             pkg_dict=package,
             radar_metadata=radar_metadata,
             radar_vocabularies=VOCABULARIES,
+            radar_policy_errors=fixed_radar_metadata_errors(
+                package, project_id, award_number
+            ),
             transfer_status=BaseController.get_transfer_status(package["id"]),
         )
 
@@ -182,7 +188,32 @@ class BaseController():
                 reviewed_metadata = normalize_reviewed_metadata(
                     request.form.get("radar_metadata")
                 )
+                project_id = toolkit.config.get(
+                    "ckanext.crc.project.id"
+                ) or os.environ.get("CKANEXT__CRC__PROJECT__ID")
+                award_number = toolkit.config.get(
+                    "ckanext.dataset_transfer.radar.dfg_award_number"
+                ) or os.environ.get(
+                    "CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER"
+                )
+                # Browser values for policy-controlled metadata are never
+                # trusted. Rebuild them from the authorized current dataset.
+                reviewed_metadata = apply_fixed_radar_metadata(
+                    reviewed_metadata,
+                    dataset,
+                    project_id=project_id,
+                    dfg_award_number=award_number,
+                    reference_descriptions=get_ckan_reference_descriptions(
+                        dataset
+                    ),
+                )
                 validation = validate_radar_metadata(reviewed_metadata)
+                policy_errors = fixed_radar_metadata_errors(
+                    dataset, project_id, award_number
+                )
+                if policy_errors:
+                    validation["errors"].extend(policy_errors)
+                    validation["success"] = False
                 if not validation["success"]:
                     return BaseController._error_response(
                         "RADAR metadata validation failed",

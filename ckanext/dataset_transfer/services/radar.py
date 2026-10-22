@@ -11,8 +11,13 @@ from xml.etree import ElementTree as ET
 import requests
 import ckan.plugins.toolkit as toolkit
 from ckanext.dataset_transfer.services.radar_metadata_mapping import (
+    apply_fixed_radar_metadata,
+    fixed_radar_metadata_errors,
     map_ckan_to_radar,
     validate_radar_metadata,
+)
+from ckanext.dataset_transfer.services.radar_reference_mapping import (
+    get_ckan_reference_descriptions,
 )
 
 
@@ -84,15 +89,6 @@ class RadarPublisher(object):
             "ckanext.dataset_transfer.radar.publisher",
             "TIB",
         )
-        self.default_subject_area = self._setting(
-            "ckanext.dataset_transfer.radar.default_subject_area",
-            "Other",
-        )
-        self.default_rights = self._setting(
-            "ckanext.dataset_transfer.radar.default_rights",
-            "Other",
-        )
-
     def _required(self, key):
         value = self._setting(key)
 
@@ -145,8 +141,34 @@ class RadarPublisher(object):
             dataset.get("name"),
             len(dataset.get("resources") or []),
         )
-        metadata = reviewed_metadata or map_ckan_to_radar(dataset, self.publisher)
+        project_id = self.config.get("ckanext.crc.project.id") or os.environ.get(
+            "CKANEXT__CRC__PROJECT__ID"
+        )
+        award_number = self.config.get(
+            "ckanext.dataset_transfer.radar.dfg_award_number"
+        ) or os.environ.get(
+            "CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER"
+        )
+        metadata = reviewed_metadata or map_ckan_to_radar(
+            dataset,
+            self.publisher,
+            project_id=project_id,
+            dfg_award_number=award_number,
+        )
+        metadata = apply_fixed_radar_metadata(
+            metadata,
+            dataset,
+            project_id=project_id,
+            dfg_award_number=award_number,
+            reference_descriptions=get_ckan_reference_descriptions(dataset),
+        )
         validation = validate_radar_metadata(metadata)
+        policy_errors = fixed_radar_metadata_errors(
+            dataset, project_id, award_number
+        )
+        if policy_errors:
+            validation["errors"].extend(policy_errors)
+            validation["success"] = False
         if not validation["success"]:
             raise RadarPublishError(
                 "RADAR metadata is incomplete: {}".format(
