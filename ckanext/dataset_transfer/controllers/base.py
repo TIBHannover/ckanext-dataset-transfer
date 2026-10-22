@@ -22,6 +22,9 @@ from ckanext.dataset_transfer.services.radar_metadata_mapping import (
     normalize_reviewed_metadata,
     validate_radar_metadata,
 )
+from ckanext.dataset_transfer.services.radar_reference_mapping import (
+    get_ckan_related_identifiers,
+)
 from datetime import datetime as _time
 
 
@@ -76,9 +79,7 @@ class BaseController():
             configured_publisher,
             project_id=project_id,
             dfg_award_number=award_number,
-            related_publications=BaseController._related_publications(
-                package.get("name")
-            ),
+            reference_related_identifiers=get_ckan_related_identifiers(package),
         )
         return render_template(
             'publish_page.html',
@@ -538,35 +539,6 @@ class BaseController():
             else:
                 status["legacy"].append(item)
         return status
-
-    @staticmethod
-    def _related_publications(package_name):
-        """Read linked publications when ckanext-Dataset-Reference is enabled."""
-        try:
-            from ckanext.dataset_reference.models.package_reference_link import (
-                PackageReferenceLink,
-            )
-        except ImportError:
-            return []
-
-        try:
-            records = PackageReferenceLink.get_by_package(package_name)
-        except Exception:
-            log.warning(
-                "Dataset reference lookup failed package_name=%s",
-                package_name,
-                exc_info=True,
-            )
-            return []
-        if not isinstance(records, list):
-            return []
-        return [
-            {"doi": record.doi or "", "url": record.url or ""}
-            for record in records
-            if record.doi or record.url
-        ]
-    
-
 
     def user_has_api_token():
         '''

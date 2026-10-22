@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+from ckanext.dataset_transfer.services.radar_reference_mapping import normalize_doi
+
 
 SUBJECT_AREAS = (
     "Engineering", "Agriculture", "Architecture", "Arts and Media", "Astrophysics and Astronomy",
@@ -137,7 +139,7 @@ ALLOWED_FIELDS = LIST_FIELDS | SCALAR_FIELDS
 
 
 def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
-                      dfg_award_number=None, related_publications=None):
+                      dfg_award_number=None, reference_related_identifiers=None):
     source = copy.deepcopy(dataset or {})
     organization = source.get("organization") if isinstance(source.get("organization"), dict) else {}
     organization_title = _text(organization.get("title"))
@@ -251,26 +253,10 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
         for item in _structured_list(source, "related_identifiers")
         if isinstance(item, dict)
     ]
-    existing_related = {
-        (item["value"].lower(), item["identifier_type"], item["relation_type"])
-        for item in related_identifiers if item["value"]
-    }
-    # Publications linked by ckanext-Dataset-Reference cite or reference this
-    # dataset, so RADAR's IsReferencedBy relation describes their direction.
-    for publication in related_publications or []:
-        if not isinstance(publication, dict):
-            continue
-        doi = _text(publication.get("doi"))
-        url = _text(publication.get("url"))
-        item = {
-            "value": doi or url,
-            "identifier_type": "DOI" if doi else "URL",
-            "relation_type": "IsReferencedBy",
-        }
-        key = (item["value"].lower(), item["identifier_type"], item["relation_type"])
-        if item["value"] and key not in existing_related:
-            related_identifiers.append(item)
-            existing_related.add(key)
+    related_identifiers = _merge_related_identifiers(
+        related_identifiers,
+        reference_related_identifiers or [],
+    )
 
     return {
         "title": _text(source.get("title") or source.get("name")),
@@ -548,11 +534,51 @@ def _normalize_rights_holder(item):
 
 
 def _normalize_related_identifier(item):
+    identifier_type = _text(
+        item.get("identifier_type") or item.get("relatedIdentifierType")
+    )
+    value = _text(
+        item.get("value") or item.get("identifier")
+        or item.get("doi") or item.get("url")
+    )
+    if identifier_type == "DOI":
+        value = normalize_doi(value) or value
     return {
-        "value": _text(item.get("value") or item.get("identifier") or item.get("doi") or item.get("url")),
-        "identifier_type": _text(item.get("identifier_type") or item.get("relatedIdentifierType")),
+        "value": value,
+        "identifier_type": identifier_type,
         "relation_type": _text(item.get("relation_type") or item.get("relationType")),
     }
+
+
+def _merge_related_identifiers(existing, imported):
+    """Merge automatic references without losing distinct confirmed relations."""
+    merged = []
+    for raw_item in list(existing) + list(imported):
+        if not isinstance(raw_item, dict):
+            continue
+        item = _normalize_related_identifier(raw_item)
+        if not item["value"]:
+            continue
+        key = _related_identifier_key(item)
+        matches = [candidate for candidate in merged if _related_identifier_key(candidate) == key]
+        if not matches:
+            merged.append(item)
+            continue
+        relation_type = item["relation_type"]
+        if relation_type and all(
+            candidate["relation_type"] != relation_type for candidate in matches
+        ):
+            # The same identifier may legitimately describe multiple relations.
+            merged.append(item)
+    return merged
+
+
+def _related_identifier_key(item):
+    identifier_type = _text(item.get("identifier_type")).upper()
+    value = _text(item.get("value"))
+    if identifier_type == "DOI":
+        value = normalize_doi(value) or value
+    return identifier_type, value.casefold()
 
 
 def _organization_rights_holder(organization):

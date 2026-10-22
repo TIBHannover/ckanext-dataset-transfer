@@ -350,6 +350,11 @@ function validate_radar_metadata_in_browser(metadata){
     if(!metadata.publishers.length || !metadata.publishers[0].name){ errors.push({field: 'publishers', message: 'Please provide a publisher.'}); }
     if(!metadata.rights){ errors.push({field: 'rights', message: 'Please select a licence.'}); }
     if(!metadata.rights_holders.length){ errors.push({field: 'rights_holders', message: 'Please provide a rights holder.'}); }
+    $.each(metadata.related_identifiers, function(index, identifier){
+        if(!identifier.relation_type){
+            errors.push({field: 'related_identifiers.' + index + '.relation_type', message: 'Please select a relationship for every related identifier.'});
+        }
+    });
     return errors;
 }
 
