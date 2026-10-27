@@ -63,13 +63,13 @@
     <div class="radar-repeatable radar-required" data-radar-list="creators" data-radar-field="creators">
       <label>{{ _('Creators') }} <span class="required">*</span></label>
       <p class="help-block">{{ _('Native CKAN authors are automatically separated and imported as people. Verify the extracted Given Name and Family Name, and add an affiliation only when it is known.') }}</p>
-      {% if radar_metadata.creators and radar_metadata.creators[0].source_author %}
-        <div class="alert alert-info"><strong>{{ _('Original CKAN author field:') }}</strong> {{ radar_metadata.creators[0].source_author }}</div>
+      {% if radar_metadata.creators and radar_metadata.creators[0].source_name %}
+        <div class="alert alert-info"><strong>{{ _('Original CKAN author field:') }}</strong> {{ radar_metadata.creators[0].source_name }}</div>
       {% endif %}
       <div class="radar-rows">
         {% for creator in radar_metadata.creators %}
           <div class="radar-row radar-person-row{% if creator.needs_review %} radar-needs-review{% endif %}">
-            <input type="hidden" class="radar-source-author" value="{{ creator.source_author }}">
+            <input type="hidden" class="radar-source-name" value="{{ creator.source_name }}">
             {% if creator.needs_review %}
               <div class="alert alert-warning radar-creator-warning">
                 {{ _('This creator was extracted from an ambiguous CKAN author format. Please verify the Given Name and Family Name before transferring this dataset to RADAR.') }}
@@ -96,13 +96,24 @@
     <hr>
     <div class="radar-repeatable" data-radar-list="contributors">
       <label>{{ _('Contributors and roles') }}</label>
+      {% if radar_metadata.contributors and radar_metadata.contributors[0].source_name %}
+        <div class="alert alert-info"><strong>{{ _('Original CKAN maintainer field:') }}</strong> {{ radar_metadata.contributors[0].source_name }}</div>
+      {% endif %}
       <div class="radar-rows">
         {% for contributor in radar_metadata.contributors %}
-          <div class="radar-row radar-person-row radar-contributor-row">
+          <div class="radar-row radar-person-row radar-contributor-row{% if contributor.needs_review %} radar-needs-review{% endif %}">
+            <input type="hidden" class="radar-source-name" value="{{ contributor.source_name }}">
+            {% if contributor.needs_review %}
+              <div class="alert alert-warning radar-creator-warning">
+                {{ _('This contributor was extracted from an ambiguous CKAN maintainer format. Please verify the Given Name and Family Name before transferring this dataset to RADAR.') }}
+                <div class="checkbox"><label><input type="checkbox" class="radar-review-confirmation"> {{ _('I have verified this contributor.') }}</label></div>
+              </div>
+            {% endif %}
             <div class="row">
-              <div class="col-md-4 form-group"><label>{{ _('Complete Name') }}</label><input class="form-control radar-name" value="{{ contributor.name }}"></div>
-              <div class="col-md-4 form-group"><label>{{ _('Role') }}</label><select class="form-control radar-contributor-type">{% for value in radar_vocabularies.contributor_types %}<option value="{{ value }}"{% if value == contributor.type %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
-              <div class="col-md-3 form-group"><label>{{ _('ORCID') }}</label><input class="form-control radar-orcid" value="{{ contributor.orcid }}"></div>
+              <div class="col-md-3 form-group"><label>{{ _('Contributor Type') }}</label><select class="form-control radar-creator-type"><option value="person"{% if contributor.creator_type != 'institution' %} selected{% endif %}>{{ _('Person and affiliation') }}</option><option value="institution"{% if contributor.creator_type == 'institution' %} selected{% endif %}>{{ _('Institution') }}</option></select></div>
+              <div class="col-md-3 form-group"><label>{{ _('Complete Name') }}</label><input class="form-control radar-name" value="{{ contributor.name }}"></div>
+              <div class="col-md-3 form-group"><label>{{ _('Role') }}</label><select class="form-control radar-contributor-type">{% for value in radar_vocabularies.contributor_types %}<option value="{{ value }}"{% if value == contributor.type %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+              <div class="col-md-2 form-group"><label>{{ _('ORCID') }}</label><input class="form-control radar-orcid" value="{{ contributor.orcid }}"></div>
               <div class="col-md-1"><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>
             </div>
             <div class="row"><div class="col-md-3 form-group"><label>{{ _('Given Name') }}</label><input class="form-control radar-given-name" value="{{ contributor.given_name }}"></div><div class="col-md-3 form-group"><label>{{ _('Family Name') }}</label><input class="form-control radar-family-name" value="{{ contributor.family_name }}"></div><div class="col-md-3 form-group"><label>{{ _('Affiliation') }}</label><input class="form-control radar-affiliation" value="{{ contributor.affiliation }}"></div><div class="col-md-3 form-group"><label>{{ _('Affiliation ROR') }}</label><input class="form-control radar-affiliation-ror" value="{{ contributor.affiliation_ror }}"></div></div>

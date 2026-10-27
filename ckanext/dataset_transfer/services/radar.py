@@ -823,7 +823,7 @@ def _container(root, name, values):
 
 def _append_person(node, item, prefix):
     if (
-        prefix == "creator"
+        prefix in ("creator", "contributor")
         and item.get("creator_type") != "institution"
         and item.get("given_name")
         and item.get("family_name")

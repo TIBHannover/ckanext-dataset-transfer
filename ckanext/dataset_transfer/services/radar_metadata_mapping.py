@@ -179,10 +179,12 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
         for item in contributors if isinstance(item, dict)
     ]
     if not contributors and _text(source.get("maintainer")):
-        contributors.append({
-            "name": _text(source.get("maintainer")), "given_name": "", "family_name": "",
-            "orcid": "", "affiliation": "", "affiliation_ror": "", "type": "DataManager",
-        })
+        contributors = []
+        for maintainer in parse_person_names(source.get("maintainer")):
+            maintainer["type"] = "DataManager"
+            contributors.append(
+                _normalize_contributor(maintainer, default_type="DataManager")
+            )
     subject_areas = _structured_list(source, "subject_area") or _structured_list(source, "subject_areas")
     subject_areas = [_text(item.get("value") if isinstance(item, dict) else item) for item in subject_areas]
     subject_areas = [value for value in subject_areas if value in SUBJECT_AREAS]
@@ -324,19 +326,19 @@ def normalize_reviewed_metadata(value):
     return normalized
 
 
-def parse_ckan_authors(author_string):
-    """Parse a legacy CKAN author value into reviewable RADAR creators.
+def parse_person_names(value):
+    """Parse a legacy CKAN person-list value into reviewable RADAR people.
 
     Strong separators are handled before comma conventions. Ambiguous comma
     orientation is retained in ``name`` and marked for explicit review instead
     of being silently treated as certain.
     """
-    original = author_string if isinstance(author_string, str) else ""
+    original = value if isinstance(value, str) else ""
     normalized = _text(original)
     if not normalized:
         return []
 
-    creators = []
+    people = []
     strong_segments = (
         [part.strip() for part in normalized.split(";") if part.strip()]
         if ";" in normalized
@@ -345,13 +347,21 @@ def parse_ckan_authors(author_string):
     for segment in strong_segments:
         entries, split_is_ambiguous = _split_author_entries(segment)
         for entry in entries:
-            creator = _parse_author_entry(entry)
-            creator["source_author"] = original
-            creator["needs_review"] = bool(
-                creator["needs_review"] or split_is_ambiguous
+            person = _parse_author_entry(entry)
+            person["source_name"] = original
+            person["needs_review"] = bool(
+                person["needs_review"] or split_is_ambiguous
             )
-            creators.append(creator)
-    return creators
+            people.append(person)
+    return people
+
+
+def parse_ckan_authors(author_string):
+    """Backward-compatible name for the shared legacy person-name parser."""
+    people = parse_person_names(author_string)
+    for person in people:
+        person["source_author"] = person["source_name"]
+    return people
 
 
 def _split_author_entries(author):
@@ -650,10 +660,18 @@ def validate_radar_metadata(metadata):
             )
         _validate_person_identifiers(errors, warnings, creator, "creators.{}".format(index))
     for index, contributor in enumerate(data["contributors"]):
+        if contributor.get("creator_type") not in CREATOR_TYPES:
+            _error(errors, "contributors.{}.creator_type".format(index), "Please select whether the contributor is a person or institution.")
         if not _person_name(contributor):
             _error(errors, "contributors.{}.name".format(index), "Please provide the contributor name.")
         if contributor.get("type") not in CONTRIBUTOR_TYPES:
             _error(errors, "contributors.{}.type".format(index), "Please select a valid contributor role.")
+        if contributor.get("needs_review"):
+            _error(
+                errors,
+                "contributors.{}.needs_review".format(index),
+                "Please verify the automatically extracted given and family names.",
+            )
         _validate_person_identifiers(errors, warnings, contributor, "contributors.{}".format(index))
     for index, item in enumerate(data["related_identifiers"]):
         if not isinstance(item, dict) or not _text(item.get("value")):
@@ -730,7 +748,7 @@ def _normalize_person(item):
         "orcid": _text(item.get("orcid") or item.get("name_identifier")),
         "affiliation": _text(item.get("affiliation")),
         "affiliation_ror": _text(item.get("affiliation_ror") or item.get("ror")),
-        "source_author": _text(item.get("source_author")),
+        "source_name": _text(item.get("source_name") or item.get("source_author")),
         "needs_review": _boolean(item.get("needs_review")),
     }
 
