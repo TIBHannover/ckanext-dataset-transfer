@@ -3,6 +3,7 @@
 import io
 import logging
 import os
+import time
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -52,7 +53,12 @@ class RadarConfigError(Exception):
 
 
 class RadarPublishError(Exception):
-    pass
+    def __init__(self, message, status=None, dataset_id=None, doi=None, missing=None):
+        super(RadarPublishError, self).__init__(message)
+        self.status = status
+        self.dataset_id = dataset_id
+        self.doi = doi
+        self.missing = missing or []
 
 
 class RadarPublisher(object):
@@ -89,6 +95,30 @@ class RadarPublisher(object):
             "ckanext.dataset_transfer.radar.publisher",
             "TIB",
         )
+        try:
+            self.verification_retry_interval = float(
+                self._setting(
+                    "ckanext.dataset_transfer.radar.verification_retry_interval", 5
+                )
+            )
+            self.verification_max_duration = float(
+                self._setting(
+                    "ckanext.dataset_transfer.radar.verification_max_duration", 120
+                )
+            )
+        except (TypeError, ValueError) as error:
+            raise RadarConfigError(
+                "RADAR verification interval and duration must be numbers"
+            ) from error
+        if self.verification_retry_interval <= 0:
+            raise RadarConfigError(
+                "RADAR verification retry interval must be greater than zero"
+            )
+        if self.verification_max_duration < 0:
+            raise RadarConfigError(
+                "RADAR verification maximum duration must not be negative"
+            )
+
     def _required(self, key):
         value = self._setting(key)
 
@@ -134,7 +164,7 @@ class RadarPublisher(object):
             raise RadarPublishError("RADAR token response did not contain access_token")
         return token_json["access_token"]
 
-    def publish_dataset(self, dataset, reviewed_metadata=None):
+    def publish_dataset(self, dataset, reviewed_metadata=None, transfer_state=None):
         log.info(
             "RADAR publish started package_id=%s package_name=%s resource_count=%s",
             dataset.get("id"),
@@ -187,22 +217,57 @@ class RadarPublisher(object):
         access_token = self._access_token()
         headers = {"Authorization": "Bearer {}".format(access_token)}
 
-        created_dataset = self._create_dataset(dataset, headers)
-        dataset_id = created_dataset["id"]
+        transfer_state = transfer_state or {}
+        resume_status = transfer_state.get("status")
+        dataset_id = transfer_state.get("published_dataset_id")
+        doi = transfer_state.get("doi") or ""
+        if dataset_id:
+            log.info(
+                "RADAR publish resuming package_id=%s dataset_id=%s status=%s",
+                dataset.get("id"),
+                dataset_id,
+                resume_status,
+            )
+        else:
+            created_dataset = self._create_dataset(dataset, headers)
+            dataset_id = created_dataset["id"]
         log.info(
             "RADAR metadata XML generated package_id=%s bytes=%s xsd_path=%s",
             dataset.get("id"),
             len(metadata_xml),
             self.descriptive_xsd_path,
         )
-        self._upload_metadata(dataset_id, metadata_xml, headers)
+        if resume_status not in (
+            "resource_upload_failure",
+            "resource_verification_pending",
+            "resource_verification_failure",
+        ):
+            try:
+                self._upload_metadata(dataset_id, metadata_xml, headers)
 
-        # RADAR removes the schema-valid placeholder identifier on upload. It must
-        # assign its DOI before validating the stored descriptive metadata.
-        doi = self._assign_doi(dataset_id, headers)
-        self._validate_uploaded_metadata(dataset_id, headers)
+                # RADAR removes the schema-valid placeholder identifier on upload. It must
+                # assign its DOI before validating the stored descriptive metadata.
+                doi = self._assign_doi(dataset_id, headers)
+                self._validate_uploaded_metadata(dataset_id, headers)
+            except RadarPublishError as error:
+                _add_transfer_context(
+                    error, "metadata_upload_failure", dataset_id, doi
+                )
+                raise
+        elif not doi:
+            try:
+                doi = self._read_doi(dataset_id, headers)
+            except RadarPublishError as error:
+                _add_transfer_context(error, resume_status, dataset_id, doi)
+                raise
 
-        archive = build_resource_archive(dataset)
+        try:
+            archive = build_resource_archive(dataset)
+        except RadarPublishError as error:
+            _add_transfer_context(
+                error, "resource_upload_failure", dataset_id, doi
+            )
+            raise
         if archive is not None:
             with zipfile.ZipFile(archive, "r") as zip_file:
                 archive_entries = [
@@ -218,8 +283,24 @@ class RadarPublisher(object):
                 archive_size,
                 archive_entries,
             )
-            self._upload_archive(dataset_id, archive, headers)
-            self._verify_uploaded_resources(dataset_id, archive_entries, headers)
+            if resume_status not in (
+                "resource_verification_pending",
+                "resource_verification_failure",
+            ):
+                try:
+                    self._upload_archive(dataset_id, archive, headers)
+                except RadarPublishError as error:
+                    _add_transfer_context(
+                        error, "resource_upload_failure", dataset_id, doi
+                    )
+                    raise
+            try:
+                self._verify_uploaded_resources(dataset_id, archive_entries, headers)
+            except RadarPublishError as error:
+                if not error.status:
+                    error.status = "resource_verification_failure"
+                _add_transfer_context(error, error.status, dataset_id, doi)
+                raise
         else:
             log.info(
                 "RADAR resource archive skipped package_id=%s dataset_id=%s reason=no_resources",
@@ -397,15 +478,90 @@ class RadarPublisher(object):
     def _verify_uploaded_resources(self, dataset_id, expected_names, headers):
         url = self.context_url + "/api/datasets/{}/children".format(dataset_id)
         rows = 100
+        expected = Counter(expected_names)
+        started_at = time.monotonic()
+        deadline = started_at + self.verification_max_duration
+        attempt = 0
+        log.info(
+            "RADAR resource verification started dataset_id=%s expected_count=%s "
+            "retry_interval=%s max_duration=%s",
+            dataset_id,
+            len(expected_names),
+            self.verification_retry_interval,
+            self.verification_max_duration,
+        )
+        while True:
+            attempt += 1
+            actual_names = self._read_uploaded_resource_names(
+                dataset_id, url, headers, rows
+            )
+            actual = Counter(actual_names)
+            missing = list((expected - actual).elements())
+            elapsed = time.monotonic() - started_at
+            log.info(
+                "RADAR resource verification dataset_id=%s attempt=%s expected=%s "
+                "actual=%s missing=%s retry_interval=%s duration=%.3f",
+                dataset_id,
+                attempt,
+                len(expected_names),
+                len(actual_names),
+                missing,
+                self.verification_retry_interval,
+                elapsed,
+            )
+            if not missing:
+                log.info(
+                    "RADAR resource verification successful dataset_id=%s "
+                    "attempt=%s expected=%s actual=%s duration=%.3f",
+                    dataset_id,
+                    attempt,
+                    len(expected_names),
+                    len(actual_names),
+                    elapsed,
+                )
+                return
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                log.error(
+                    "RADAR resource verification timeout dataset_id=%s attempt=%s "
+                    "expected=%s actual=%s missing=%s duration=%.3f",
+                    dataset_id,
+                    attempt,
+                    len(expected_names),
+                    len(actual_names),
+                    missing,
+                    elapsed,
+                )
+                raise RadarPublishError(
+                    "RADAR resource verification timed out for dataset {} after "
+                    "{:.3f} seconds: expected {} files, found {}; missing archive "
+                    "entries: {}".format(
+                        dataset_id,
+                        elapsed,
+                        len(expected_names),
+                        len(actual_names),
+                        ", ".join(missing),
+                    ),
+                    status="resource_verification_pending",
+                    dataset_id=dataset_id,
+                    missing=missing,
+                )
+
+            delay = min(self.verification_retry_interval, remaining)
+            log.info(
+                "RADAR resource verification retrying dataset_id=%s attempt=%s "
+                "in=%s seconds",
+                dataset_id,
+                attempt,
+                delay,
+            )
+            time.sleep(delay)
+
+    def _read_uploaded_resource_names(self, dataset_id, url, headers, rows):
         offset = 0
         children = []
         total_hits = None
-        log.info(
-            "RADAR resource verification started dataset_id=%s expected_count=%s",
-            dataset_id,
-            len(expected_names),
-        )
-
         while total_hits is None or offset < total_hits:
             try:
                 response = self.requests.get(
@@ -422,7 +578,11 @@ class RadarPublisher(object):
                     offset,
                 )
                 raise RadarPublishError(
-                    "RADAR resource verification failed: {}".format(error)
+                    "RADAR resource verification failed for dataset {}: {}".format(
+                        dataset_id, error
+                    ),
+                    status="resource_verification_failure",
+                    dataset_id=dataset_id,
                 )
             _log_response("RADAR children response", response)
             self._raise_for_radar(response, "RADAR resource verification failed")
@@ -430,11 +590,13 @@ class RadarPublisher(object):
                 result = response.json()
             except ValueError as error:
                 raise RadarPublishError(
-                    "RADAR resource verification returned an invalid response"
+                    "RADAR resource verification returned an invalid response for "
+                    "dataset {}".format(dataset_id)
                 ) from error
             if not isinstance(result, dict) or not isinstance(result.get("data"), list):
                 raise RadarPublishError(
-                    "RADAR resource verification response did not contain a data list"
+                    "RADAR resource verification response for dataset {} did not "
+                    "contain a data list".format(dataset_id)
                 )
 
             page = result["data"]
@@ -443,44 +605,20 @@ class RadarPublisher(object):
                 total_hits = int(result.get("totalHits", len(children)))
             except (TypeError, ValueError) as error:
                 raise RadarPublishError(
-                    "RADAR resource verification returned an invalid totalHits value"
+                    "RADAR resource verification returned an invalid totalHits value "
+                    "for dataset {}".format(dataset_id)
                 ) from error
             offset += len(page)
             if not page and offset < total_hits:
                 raise RadarPublishError(
-                    "RADAR resource verification pagination ended before all children were returned"
+                    "RADAR resource verification pagination for dataset {} ended "
+                    "before all children were returned".format(dataset_id)
                 )
 
-        actual_names = [
-            child.get("fileName")
-            for child in children
-            if isinstance(child, dict) and child.get("fileName")
+        return [
+            name for name in (_radar_child_filename(child) for child in children)
+            if name
         ]
-        expected = Counter(expected_names)
-        actual = Counter(actual_names)
-        missing = list((expected - actual).elements())
-        if missing or len(actual_names) != len(expected_names):
-            log.error(
-                "RADAR resource verification failed dataset_id=%s expected=%s actual=%s missing=%s",
-                dataset_id,
-                expected_names,
-                actual_names,
-                missing,
-            )
-            raise RadarPublishError(
-                "RADAR resource verification failed: expected {} files, found {}; "
-                "missing archive entries: {}".format(
-                    len(expected_names),
-                    len(actual_names),
-                    ", ".join(missing) or "none",
-                )
-            )
-        log.info(
-            "RADAR resource verification passed dataset_id=%s count=%s files=%s",
-            dataset_id,
-            len(actual_names),
-            actual_names,
-        )
 
     def _read_doi(self, dataset_id, headers):
         url = self.context_url + "/api/datasets/{}/doi".format(dataset_id)
@@ -529,6 +667,36 @@ class RadarPublisher(object):
             return value
 
         return default
+
+
+def _add_transfer_context(error, status, dataset_id, doi):
+    error.status = status
+    error.dataset_id = dataset_id
+    error.doi = doi or error.doi
+
+
+def _radar_child_filename(child):
+    """Return a RADAR file name while excluding collection/folder children."""
+    if not isinstance(child, dict):
+        return None
+    child_type = str(
+        child.get("type") or child.get("resourceType") or child.get("kind") or ""
+    ).upper()
+    if child_type in ("DIRECTORY", "FOLDER", "COLLECTION"):
+        return None
+
+    technical_metadata = child.get("technicalMetadata")
+    if not isinstance(technical_metadata, dict):
+        technical_metadata = {}
+    name = (
+        child.get("fileName")
+        or technical_metadata.get("fileName")
+        or child.get("filename")
+        or child.get("name")
+    )
+    if not isinstance(name, str) or not name or name.endswith("/"):
+        return None
+    return name
 
 
 def build_radar_metadata_xml(metadata, identifier_prefix=None, **legacy_options):

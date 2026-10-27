@@ -165,6 +165,11 @@ class BaseController():
                         existing_transfer, serialize=True
                     ),
                 )
+            incomplete_radar_transfer = None
+            if publish_target == "radar":
+                incomplete_radar_transfer = (
+                    PublishedDataset.get_incomplete_radar_transfer(dataset["id"])
+                )
             
             if terms_of_use_consent != "true" or rights_of_use_consent != "true":
                 log.warning(
@@ -223,9 +228,16 @@ class BaseController():
                         warnings=validation["warnings"],
                     )
                 try:
+                    transfer_state = None
+                    if incomplete_radar_transfer:
+                        transfer_state = PublishedDataset.decode_incomplete_radar_id(
+                            incomplete_radar_transfer.published_dataset_id
+                        )
+                        transfer_state["doi"] = incomplete_radar_transfer.doi or ""
                     radar_result = RadarPublisher().publish_dataset(
                         dataset,
                         validation["metadata"],
+                        transfer_state=transfer_state,
                     )
                 except RadarConfigError as error:
                     log.exception(
@@ -237,21 +249,62 @@ class BaseController():
                     )
                 except RadarPublishError as error:
                     log.exception(
-                        "Dataset transfer RADAR publish failed package_id=%s",
+                        "Dataset transfer RADAR publish failed package_id=%s "
+                        "dataset_id=%s status=%s missing=%s",
                         dataset.get("id"),
+                        error.dataset_id,
+                        error.status,
+                        error.missing,
                     )
+                    if error.dataset_id and error.status:
+                        published_url = toolkit.config.get(
+                            "ckanext.dataset_transfer.radar.dataset_url_template",
+                            "",
+                        )
+                        if published_url:
+                            published_url = published_url.format(
+                                dataset_id=error.dataset_id
+                            )
+                        if incomplete_radar_transfer:
+                            incomplete_radar_transfer.doi = error.doi or ""
+                            incomplete_radar_transfer.published_url = published_url
+                            incomplete_radar_transfer.published_dataset_id = (
+                                PublishedDataset.encode_incomplete_radar_id(
+                                    error.status, error.dataset_id
+                                )
+                            )
+                            incomplete_radar_transfer.save()
+                        else:
+                            incomplete_radar_transfer = PublishedDataset(
+                                dataset_id=dataset["id"],
+                                doi=error.doi or "",
+                                published_url=published_url,
+                                published_dataset_id=(
+                                    PublishedDataset.encode_incomplete_radar_id(
+                                        error.status, error.dataset_id
+                                    )
+                                ),
+                                publish_time=_time.now(),
+                            )
+                            incomplete_radar_transfer.save()
                     return BaseController._error_response(
-                        "RADAR publish failed", str(error), 502
+                        "RADAR publish failed",
+                        str(error),
+                        502,
+                        transfer_status=error.status,
+                        radar_dataset_id=error.dataset_id,
+                        missing_filenames=error.missing,
                     )
 
-                dataset_db_object = PublishedDataset(
-                    dataset_id=dataset["id"],
-                    doi=radar_result.get("doi") or "",
-                    published_url=radar_result["published_url"],
-                    published_dataset_id=PublishedDataset.encode_target_id(
+                dataset_db_object = incomplete_radar_transfer or PublishedDataset(
+                    dataset_id=dataset["id"], publish_time=_time.now()
+                )
+                dataset_db_object.doi = radar_result.get("doi") or ""
+                dataset_db_object.published_url = radar_result["published_url"]
+                dataset_db_object.published_dataset_id = (
+                    PublishedDataset.encode_target_id(
                         "radar", radar_result["published_dataset_id"]
-                    ),
-                    publish_time=_time.now(),
+                    )
                 )
                 dataset_db_object.save()
                 log.info(
@@ -549,11 +602,21 @@ class BaseController():
         publish_time = record.publish_time
         if serialize and publish_time:
             publish_time = publish_time.isoformat()
-        target, published_dataset_id = PublishedDataset.decode_target_id(
+        incomplete = PublishedDataset.decode_incomplete_radar_id(
             record.published_dataset_id
         )
+        if incomplete:
+            target = "radar_incomplete"
+            published_dataset_id = incomplete["published_dataset_id"]
+            transfer_status = incomplete["status"]
+        else:
+            target, published_dataset_id = PublishedDataset.decode_target_id(
+                record.published_dataset_id
+            )
+            transfer_status = "successful_transfer" if target else None
         return {
             "target": target or "legacy",
+            "status": transfer_status,
             "doi": record.doi or "",
             "published_url": record.published_url or "",
             "published_dataset_id": published_dataset_id,
@@ -562,10 +625,15 @@ class BaseController():
 
     @staticmethod
     def get_transfer_status(dataset_id):
-        status = {"luh": None, "radar": None, "legacy": []}
+        status = {
+            "luh": None,
+            "radar": None,
+            "radar_incomplete": None,
+            "legacy": [],
+        }
         for record in PublishedDataset.get_all_by_dataset(dataset_id):
             item = BaseController._transfer_record(record)
-            if item["target"] in ("luh", "radar"):
+            if item["target"] in ("luh", "radar", "radar_incomplete"):
                 status[item["target"]] = item
             else:
                 status["legacy"].append(item)

@@ -21,6 +21,7 @@ published_dataset_table = Table(
 
 class PublishedDataset(domain_object.DomainObject):
     TARGET_ID_PREFIX = u"dataset-transfer-target:"
+    RADAR_INCOMPLETE_PREFIX = u"dataset-transfer-radar-incomplete:"
 
     def __init__(self, dataset_id=None, doi=None, published_url=None, publish_time=None,
                  published_dataset_id=None):
@@ -57,6 +58,15 @@ class PublishedDataset(domain_object.DomainObject):
         ).autoflush(autoflush).first()
 
     @classmethod
+    def get_incomplete_radar_transfer(cls, id, autoflush=True):
+        if not id:
+            return None
+        return meta.Session.query(cls).filter(
+            cls.dataset_id == id,
+            cls.published_dataset_id.like(cls.RADAR_INCOMPLETE_PREFIX + u"%"),
+        ).autoflush(autoflush).first()
+
+    @classmethod
     def get_all_by_dataset(cls, id, autoflush=True):
         if not id:
             return []
@@ -82,6 +92,26 @@ class PublishedDataset(domain_object.DomainObject):
             if value.startswith(prefix):
                 return target, value[len(prefix):]
         return None, value
+
+    @classmethod
+    def encode_incomplete_radar_id(cls, status, published_dataset_id):
+        return cls.RADAR_INCOMPLETE_PREFIX + status + u":" + (
+            published_dataset_id or u""
+        )
+
+    @classmethod
+    def decode_incomplete_radar_id(cls, value):
+        value = value or u""
+        if not value.startswith(cls.RADAR_INCOMPLETE_PREFIX):
+            return None
+        remainder = value[len(cls.RADAR_INCOMPLETE_PREFIX):]
+        status, separator, published_dataset_id = remainder.partition(u":")
+        if not separator:
+            return None
+        return {
+            "status": status,
+            "published_dataset_id": published_dataset_id,
+        }
 
 
 

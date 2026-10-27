@@ -61,6 +61,8 @@ Add the RADAR test settings to your local CKAN config:
     ckanext.dataset_transfer.radar.schema_version = 9.3
     ckanext.dataset_transfer.radar.publisher = TIB
     ckanext.dataset_transfer.radar.metadata_identifier_prefix = 10.0000
+    ckanext.dataset_transfer.radar.verification_retry_interval = 5
+    ckanext.dataset_transfer.radar.verification_max_duration = 120
 
 Project-specific DFG funding defaults use `ckanext.crc.project.id` (or the
 Docker variable `CKANEXT__CRC__PROJECT__ID`). Configure the verified award
