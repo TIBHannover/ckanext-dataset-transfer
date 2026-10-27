@@ -62,10 +62,20 @@
     <legend>{{ _('Creators and Contributors') }}</legend>
     <div class="radar-repeatable radar-required" data-radar-list="creators" data-radar-field="creators">
       <label>{{ _('Creators') }} <span class="required">*</span></label>
-      <p class="help-block">{{ _('Native CKAN authors are imported as people without splitting their names. Add an affiliation only when it is known.') }}</p>
+      <p class="help-block">{{ _('Native CKAN authors are automatically separated and imported as people. Verify the extracted Given Name and Family Name, and add an affiliation only when it is known.') }}</p>
+      {% if radar_metadata.creators and radar_metadata.creators[0].source_author %}
+        <div class="alert alert-info"><strong>{{ _('Original CKAN author field:') }}</strong> {{ radar_metadata.creators[0].source_author }}</div>
+      {% endif %}
       <div class="radar-rows">
         {% for creator in radar_metadata.creators %}
-          <div class="radar-row radar-person-row">
+          <div class="radar-row radar-person-row{% if creator.needs_review %} radar-needs-review{% endif %}">
+            <input type="hidden" class="radar-source-author" value="{{ creator.source_author }}">
+            {% if creator.needs_review %}
+              <div class="alert alert-warning radar-creator-warning">
+                {{ _('This creator was extracted from an ambiguous CKAN author format. Please verify the Given Name and Family Name before transferring this dataset to RADAR.') }}
+                <div class="checkbox"><label><input type="checkbox" class="radar-review-confirmation"> {{ _('I have verified this creator.') }}</label></div>
+              </div>
+            {% endif %}
             <div class="row">
               <div class="col-md-3 form-group"><label>{{ _('Creator Type') }} *</label><select class="form-control radar-creator-type"><option value="person"{% if creator.creator_type != 'institution' %} selected{% endif %}>{{ _('Person and affiliation') }}</option><option value="institution"{% if creator.creator_type == 'institution' %} selected{% endif %}>{{ _('Institution') }}</option></select></div>
               <div class="col-md-3 form-group"><label>{{ _('Creator Name') }} *</label><input class="form-control radar-name" value="{{ creator.name }}"></div>

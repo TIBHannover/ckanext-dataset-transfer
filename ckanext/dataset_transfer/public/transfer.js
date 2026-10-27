@@ -320,7 +320,8 @@ function collect_radar_metadata(){
 }
 
 function collect_person(row){
-    return {creator_type: row.find('.radar-creator-type').val() || '', name: clean_value(row.find('.radar-name').val()), given_name: clean_value(row.find('.radar-given-name').val()), family_name: clean_value(row.find('.radar-family-name').val()), orcid: clean_value(row.find('.radar-orcid').val()), affiliation: clean_value(row.find('.radar-affiliation').val()), affiliation_ror: clean_value(row.find('.radar-affiliation-ror').val())};
+    let reviewConfirmation = row.find('.radar-review-confirmation');
+    return {creator_type: row.find('.radar-creator-type').val() || '', name: clean_value(row.find('.radar-name').val()), given_name: clean_value(row.find('.radar-given-name').val()), family_name: clean_value(row.find('.radar-family-name').val()), orcid: clean_value(row.find('.radar-orcid').val()), affiliation: clean_value(row.find('.radar-affiliation').val()), affiliation_ror: clean_value(row.find('.radar-affiliation-ror').val()), source_author: clean_value(row.find('.radar-source-author').val()), needs_review: reviewConfirmation.length ? !reviewConfirmation.prop('checked') : false};
 }
 
 function collect_text_rows(name){
@@ -341,6 +342,7 @@ function validate_radar_metadata_in_browser(metadata){
         let personName = creator.name || creator.given_name || creator.family_name;
         if(['person', 'institution'].indexOf(creator.creator_type) === -1){ errors.push({field: 'creators.' + index + '.creator_type', message: 'Please select whether the creator is a person or institution.'}); }
         if(!personName){ errors.push({field: 'creators.' + index + '.name', message: 'Please provide the creator name.'}); }
+        if(creator.needs_review){ errors.push({field: 'creators.' + index + '.needs_review', message: 'Please verify the automatically extracted given and family names.'}); }
     });
     if(!metadata.production_year){ errors.push({field: 'production_year', message: 'Please provide the production year.'}); }
     if(!metadata.subject_areas.length){ errors.push({field: 'subject_areas', message: 'Please select a scientific subject area.'}); }

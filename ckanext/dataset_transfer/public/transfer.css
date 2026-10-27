@@ -57,6 +57,19 @@
   margin-top: 8px;
 }
 
+.radar-needs-review {
+  border-color: #8a6d3b;
+  border-left: 4px solid #8a6d3b;
+}
+
+.radar-creator-warning {
+  margin-bottom: 10px;
+}
+
+.radar-creator-warning .checkbox {
+  margin-bottom: 0;
+}
+
 .radar-remove {
   margin-top: 2px;
 }

@@ -822,7 +822,19 @@ def _container(root, name, values):
 
 
 def _append_person(node, item, prefix):
-    name = item.get("name") or ", ".join(part for part in (item.get("family_name"), item.get("given_name")) if part)
+    if (
+        prefix == "creator"
+        and item.get("creator_type") != "institution"
+        and item.get("given_name")
+        and item.get("family_name")
+    ):
+        name = "{}, {}".format(item["family_name"], item["given_name"])
+    else:
+        name = item.get("name") or ", ".join(
+            part
+            for part in (item.get("family_name"), item.get("given_name"))
+            if part
+        )
     ET.SubElement(node, _element_tag(prefix + "Name")).text = name
     # RADAR v9.3 has no creatorType attribute. The review-only type controls
     # whether person-specific name parts are emitted.

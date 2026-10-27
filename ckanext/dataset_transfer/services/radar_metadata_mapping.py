@@ -79,6 +79,19 @@ FIXED_SUBJECT_AREA = "Engineering"
 DFG_FUNDER_NAME = "Deutsche Forschungsgemeinschaft (DFG)"
 DFG_ROR = "https://ror.org/018mejw64"
 DFG_ROR_SCHEME_URI = "https://ror.org/"
+NAME_PARTICLES = {
+    "da", "de", "del", "della", "der", "di", "du", "la", "le", "ten",
+    "ter", "van", "von", "zu", "zum", "zur",
+}
+ACADEMIC_TITLES = {
+    "dr", "dr.", "prof", "prof.", "professor", "phd", "ph.d.",
+}
+ORGANIZATION_WORDS = {
+    "academy", "department", "faculty", "gmbh", "group", "institute",
+    "institut", "laboratory", "labor", "university", "universität",
+}
+
+
 def _language_vocabulary():
     path = Path(__file__).resolve().parent.parent / "schemas" / "radar" / "v9.3" / "RadarTypes.xsd"
     namespace = {"xs": "http://www.w3.org/2001/XMLSchema", "dc": "http://purl.org/dc/elements/1.1/"}
@@ -158,14 +171,7 @@ def map_ckan_to_radar(dataset, configured_publisher=None, project_id=None,
     if creators:
         creators = [_normalize_person(item) for item in creators if isinstance(item, dict)]
     elif _text(source.get("author")):
-        author = _text(source.get("author"))
-        # A native CKAN author string identifies a person. Keep the complete
-        # value intact; do not guess where the given/family-name boundary lies.
-        creators = [{
-            "creator_type": "person", "name": author,
-            "given_name": author, "family_name": "", "orcid": "",
-            "affiliation": "", "affiliation_ror": "",
-        }]
+        creators = parse_ckan_authors(source.get("author"))
 
     contributors = _structured_list(source, "contributors")
     contributors = [
@@ -318,6 +324,177 @@ def normalize_reviewed_metadata(value):
     return normalized
 
 
+def parse_ckan_authors(author_string):
+    """Parse a legacy CKAN author value into reviewable RADAR creators.
+
+    Strong separators are handled before comma conventions. Ambiguous comma
+    orientation is retained in ``name`` and marked for explicit review instead
+    of being silently treated as certain.
+    """
+    original = author_string if isinstance(author_string, str) else ""
+    normalized = _text(original)
+    if not normalized:
+        return []
+
+    creators = []
+    strong_segments = (
+        [part.strip() for part in normalized.split(";") if part.strip()]
+        if ";" in normalized
+        else [normalized]
+    )
+    for segment in strong_segments:
+        entries, split_is_ambiguous = _split_author_entries(segment)
+        for entry in entries:
+            creator = _parse_author_entry(entry)
+            creator["source_author"] = original
+            creator["needs_review"] = bool(
+                creator["needs_review"] or split_is_ambiguous
+            )
+            creators.append(creator)
+    return creators
+
+
+def _split_author_entries(author):
+    possible_conjunction_parts = [
+        part.strip()
+        for part in re.split(r"\s+and\s+", author, flags=re.I)
+        if part.strip()
+    ]
+    author_words = {
+        word.casefold().strip(".,") for word in author.split()
+    }
+    if (
+        len(possible_conjunction_parts) > 1
+        and not author_words & ORGANIZATION_WORDS
+        and all(
+            _looks_like_author_segment(part)
+            for part in possible_conjunction_parts
+        )
+    ):
+        conjunction_parts = possible_conjunction_parts
+    else:
+        conjunction_parts = [author]
+    entries = []
+    ambiguous = False
+    for part in conjunction_parts:
+        comma_parts = [item.strip() for item in part.split(",") if item.strip()]
+        if len(comma_parts) <= 1:
+            entries.extend(comma_parts)
+        elif _is_repeated_family_initial_list(comma_parts):
+            entries.extend(
+                "{}, {}".format(comma_parts[index], comma_parts[index + 1])
+                for index in range(0, len(comma_parts), 2)
+            )
+        elif all(_looks_like_full_name(item) for item in comma_parts):
+            entries.extend(comma_parts)
+        elif len(comma_parts) == 2:
+            # A single comma commonly belongs to one name (Family, Given or
+            # Given, Family). Keep it together; orientation is handled below.
+            entries.append(part.strip())
+        else:
+            # The number of people cannot be established safely. Preserve the
+            # complete segment as one review-required creator.
+            entries.append(part.strip())
+            ambiguous = True
+    return entries, ambiguous
+
+
+def _looks_like_author_segment(value):
+    comma_parts = [part.strip() for part in value.split(",") if part.strip()]
+    if not comma_parts:
+        return False
+    if len(comma_parts) == 1:
+        return _looks_like_full_name(comma_parts[0])
+    return (
+        _is_repeated_family_initial_list(comma_parts)
+        or all(_looks_like_full_name(part) for part in comma_parts)
+        or len(comma_parts) == 2
+    )
+
+
+def _is_repeated_family_initial_list(parts):
+    return (
+        len(parts) >= 4
+        and len(parts) % 2 == 0
+        and all(
+            _looks_like_family(parts[index]) and _is_initials(parts[index + 1])
+            for index in range(0, len(parts), 2)
+        )
+    )
+
+
+def _parse_author_entry(entry):
+    name = re.sub(r"\s+", " ", entry).strip()
+    given = ""
+    family = ""
+    needs_review = False
+    comma_parts = [part.strip() for part in name.split(",")]
+
+    if len(comma_parts) == 2 and all(comma_parts):
+        left, right = comma_parts
+        if _is_initials(right):
+            family, given = left, right
+        elif _is_all_upper_name(left) and not _is_all_upper_name(right):
+            family, given = left, right
+            # Case is useful evidence, but never sufficient for silent certainty.
+            needs_review = True
+        else:
+            given, family = left, right
+            needs_review = True
+    elif len(comma_parts) > 1:
+        needs_review = True
+    else:
+        words = name.split()
+        lowered = {word.casefold().strip(".,") for word in words}
+        if len(words) == 1 or lowered & ORGANIZATION_WORDS:
+            needs_review = True
+        elif words[0].casefold() in ACADEMIC_TITLES:
+            needs_review = True
+        else:
+            family_start = len(words) - 1
+            while (
+                family_start > 0
+                and words[family_start - 1].casefold().strip(".,") in NAME_PARTICLES
+            ):
+                family_start -= 1
+            given = " ".join(words[:family_start])
+            family = " ".join(words[family_start:])
+            if not given or not family:
+                given = ""
+                family = ""
+                needs_review = True
+
+    return {
+        "creator_type": "person",
+        "name": name,
+        "given_name": given,
+        "family_name": family,
+        "orcid": "",
+        "affiliation": "",
+        "affiliation_ror": "",
+        "needs_review": needs_review,
+    }
+
+
+def _looks_like_full_name(value):
+    words = value.split()
+    return len(words) >= 2 and not _is_initials(value)
+
+
+def _looks_like_family(value):
+    return bool(value and not any(character.isdigit() for character in value))
+
+
+def _is_initials(value):
+    tokens = value.replace("-", " ").split()
+    return bool(tokens) and all(re.match(r"^[^\W\d_]\.?$", token, re.UNICODE) for token in tokens)
+
+
+def _is_all_upper_name(value):
+    letters = [character for character in value if character.isalpha()]
+    return bool(letters) and all(character.isupper() for character in letters)
+
+
 def apply_fixed_radar_metadata(metadata, dataset, project_id=None,
                                dfg_award_number=None,
                                reference_descriptions=None):
@@ -465,6 +642,12 @@ def validate_radar_metadata(metadata):
             _error(errors, "creators.{}.creator_type".format(index), "Please select whether the creator is a person or institution.")
         if not _person_name(creator):
             _error(errors, "creators.{}.name".format(index), "Please provide the creator name.")
+        if creator.get("needs_review"):
+            _error(
+                errors,
+                "creators.{}.needs_review".format(index),
+                "Please verify the automatically extracted given and family names.",
+            )
         _validate_person_identifiers(errors, warnings, creator, "creators.{}".format(index))
     for index, contributor in enumerate(data["contributors"]):
         if not _person_name(contributor):
@@ -547,6 +730,8 @@ def _normalize_person(item):
         "orcid": _text(item.get("orcid") or item.get("name_identifier")),
         "affiliation": _text(item.get("affiliation")),
         "affiliation_ror": _text(item.get("affiliation_ror") or item.get("ror")),
+        "source_author": _text(item.get("source_author")),
+        "needs_review": _boolean(item.get("needs_review")),
     }
 
 
@@ -876,3 +1061,9 @@ def _text(value):
     if isinstance(value, (dict, list)):
         return ""
     return str(value).strip()
+
+
+def _boolean(value):
+    if isinstance(value, bool):
+        return value
+    return _text(value).lower() in ("1", "true", "yes", "on")
