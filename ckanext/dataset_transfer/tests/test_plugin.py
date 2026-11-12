@@ -56,15 +56,33 @@ def dataset_transfer_migrated_db(clean_db):
 
 
 @pytest.fixture
-def csrf_enforced_app(app, ckan_config):
+def csrf_enforced_app(app):
     flask_app = app.flask_app
     csrf = flask_app.extensions["csrf"]
     blueprint = flask_app.blueprints["dataset_transfer"]
+    blueprint_name = blueprint.name
+    exemption_keys = (blueprint, blueprint_name)
+    original_enabled = flask_app.config["WTF_CSRF_ENABLED"]
+    original_check_default = flask_app.config["WTF_CSRF_CHECK_DEFAULT"]
+    original_exemptions = {
+        key for key in exemption_keys if key in csrf._exempt_blueprints
+    }
 
-    assert ckan_config["ckan.csrf_protection.ignore_extensions"] is False
-    assert flask_app.config["WTF_CSRF_ENABLED"] is True
-    assert blueprint not in csrf._exempt_blueprints
-    return app
+    flask_app.config["WTF_CSRF_ENABLED"] = True
+    flask_app.config["WTF_CSRF_CHECK_DEFAULT"] = True
+    for key in exemption_keys:
+        csrf._exempt_blueprints.discard(key)
+    try:
+        assert flask_app.config["WTF_CSRF_ENABLED"] is True
+        assert flask_app.config["WTF_CSRF_CHECK_DEFAULT"] is True
+        assert not any(key in csrf._exempt_blueprints for key in exemption_keys)
+        yield app
+    finally:
+        flask_app.config["WTF_CSRF_ENABLED"] = original_enabled
+        flask_app.config["WTF_CSRF_CHECK_DEFAULT"] = original_check_default
+        for key in exemption_keys:
+            csrf._exempt_blueprints.discard(key)
+        csrf._exempt_blueprints.update(original_exemptions)
 
 
 def _body(response):
@@ -224,6 +242,18 @@ def test_publish_post_accepts_csrf_token_from_rendered_page(
     )
     assert missing_token.status_code == 400
     assert "CSRF token is missing" in missing_token.get_data(as_text=True)
+    assert publish_calls == []
+
+    invalid_token = client.post(
+        "/dataset_transfer/publish",
+        data={
+            "_csrf_token": "invalid-token",
+            "package_id": dataset["id"],
+        },
+        extra_environ={"REMOTE_USER": user["name"]},
+    )
+    assert invalid_token.status_code == 400
+    assert "CSRF token is invalid" in invalid_token.get_data(as_text=True)
     assert publish_calls == []
 
     response = client.post(
