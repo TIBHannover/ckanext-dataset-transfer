@@ -294,7 +294,7 @@ class BaseController():
             dataset_to_publish["isopen"] = True
             dataset_to_publish["private"] = False
             dataset_to_publish["owner_org"] = org_answer['result']['id']
-            dataset_to_publish.pop['id'] = ""
+            dataset_to_publish.pop("id", None)
             dataset_to_publish['terms_of_usage'] = "Yes"
             dataset_to_publish['have_copyright'] = "Yes"
             headers["Content-Type"] = "application/json"

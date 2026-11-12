@@ -509,7 +509,11 @@ def test_publish_dataset_with_url_and_uploaded_resources_uses_mocked_api(
             )
         )
         if url.endswith("/package_create"):
-            assert json["id"] == ""
+            assert "id" not in json
+            assert dataset["id"] not in json.values()
+            assert json["name"] == dataset["name"]
+            assert json["title"] == dataset["title"]
+            assert json["notes"] == dataset["notes"]
             assert json["resources"] == []
             assert json["groups"] == []
             assert json["private"] is False
@@ -557,6 +561,7 @@ def test_publish_dataset_with_url_and_uploaded_resources_uses_mocked_api(
     assert response.status_code == 200
     assert response.json["success"] is True
     assert response.json["doi"] == "10.123/test"
+    assert response.json["published_dataset_id"] == "target-dataset-id"
     assert response.json["published_url"].endswith("/dataset/target-dataset")
     assert [call[1].rsplit("/", 1)[-1] for call in calls] == [
         "organization_show",
@@ -567,7 +572,13 @@ def test_publish_dataset_with_url_and_uploaded_resources_uses_mocked_api(
         "resource_patch",
     ]
     assert dataset == original_dataset
-    assert PublishedDataset.get_by_dataset("local-dataset-id").doi == "10.123/test"
+    publication = PublishedDataset.get_by_dataset("local-dataset-id")
+    assert publication.dataset_id == "local-dataset-id"
+    assert publication.doi == "10.123/test"
+    assert PublishedDataset.decode_target_id(publication.published_dataset_id) == (
+        "luh",
+        "target-dataset-id",
+    )
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
@@ -803,6 +814,7 @@ def test_resource_failure_keeps_incomplete_transfer_and_never_reports_success(
 
     def fake_post(url, **kwargs):
         if url.endswith("/package_create"):
+            assert "id" not in kwargs["json"]
             return FakeResponse(
                 200,
                 {
