@@ -56,10 +56,15 @@ def dataset_transfer_migrated_db(clean_db):
 
 
 @pytest.fixture
-def csrf_enforced_app(make_app, ckan_config):
-    ckan_config["ckan.csrf_protection.ignore_extensions"] = False
-    ckan_config["WTF_CSRF_ENABLED"] = True
-    return make_app()
+def csrf_enforced_app(app, ckan_config):
+    flask_app = app.flask_app
+    csrf = flask_app.extensions["csrf"]
+    blueprint = flask_app.blueprints["dataset_transfer"]
+
+    assert ckan_config["ckan.csrf_protection.ignore_extensions"] is False
+    assert flask_app.config["WTF_CSRF_ENABLED"] is True
+    assert blueprint not in csrf._exempt_blueprints
+    return app
 
 
 def _body(response):
@@ -198,6 +203,19 @@ def test_publish_post_accepts_csrf_token_from_rendered_page(
         r'<meta name="_csrf_token" content="([^"]+)"', page_body
     )
     assert token_match, page_body
+    publish_calls = []
+    view_functions = csrf_enforced_app.flask_app.view_functions
+    publish_view = view_functions["dataset_transfer.publish"]
+
+    def tracked_publish_view():
+        publish_calls.append(True)
+        return publish_view()
+
+    monkeypatch.setitem(
+        view_functions,
+        "dataset_transfer.publish",
+        tracked_publish_view,
+    )
 
     missing_token = client.post(
         "/dataset_transfer/publish",
@@ -206,6 +224,7 @@ def test_publish_post_accepts_csrf_token_from_rendered_page(
     )
     assert missing_token.status_code == 400
     assert "CSRF token is missing" in missing_token.get_data(as_text=True)
+    assert publish_calls == []
 
     response = client.post(
         "/dataset_transfer/publish",
@@ -219,6 +238,7 @@ def test_publish_post_accepts_csrf_token_from_rendered_page(
     )
     assert response.status_code == 400
     assert response.json["error"] == "Missing consent"
+    assert publish_calls == [True]
 
     missing_form_token = client.post(
         "/dataset_transfer/load_publish_form_data",
