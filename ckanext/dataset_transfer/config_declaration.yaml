@@ -1,0 +1,10 @@
+version: 1
+groups:
+  - annotation: Dataset transfer destination settings
+    options:
+      - key: ckanext.dataset_transfer.target_organization
+        description: Verified organization identifier on the destination CKAN instance.
+      - key: ckanext.dataset_transfer.target_api_url
+        description: Destination CKAN action API base URL, ending in /api/3/action/.
+      - key: ckanext.dataset_transfer.target_public_url
+        description: Public base URL used to construct destination dataset links.

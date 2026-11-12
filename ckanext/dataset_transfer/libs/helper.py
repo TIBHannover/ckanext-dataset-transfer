@@ -7,6 +7,13 @@ import requests
 import ckan.plugins.toolkit as toolkit
 
 
+TARGET_ORGANIZATION_CONFIG = "ckanext.dataset_transfer.target_organization"
+TARGET_API_URL_CONFIG = "ckanext.dataset_transfer.target_api_url"
+TARGET_PUBLIC_URL_CONFIG = "ckanext.dataset_transfer.target_public_url"
+DEFAULT_TARGET_API_URL = "https://data.uni-hannover.de/api/3/action/"
+DEFAULT_TARGET_PUBLIC_URL = "https://data.uni-hannover.de/"
+
+
 class Helper():
 
 
@@ -103,13 +110,25 @@ class Helper():
 
 
     def get_organization_id():
-        ckan_root_path = toolkit.config.get('ckan.root_path')
-        if  ckan_root_path and 'sfb1368/ckan' in ckan_root_path:
-            return "sfb_1368"
-        elif ckan_root_path and 'sfb1153/ckan' in ckan_root_path:
-            return "sfb_1153"
-        else:
-            return "" 
+        """Return the configured organization on the destination CKAN."""
+        return (toolkit.config.get(TARGET_ORGANIZATION_CONFIG) or "").strip()
+
+    @staticmethod
+    def get_target_api_url():
+        return Helper._normalized_url(
+            toolkit.config.get(TARGET_API_URL_CONFIG) or DEFAULT_TARGET_API_URL
+        )
+
+    @staticmethod
+    def get_target_public_url():
+        return Helper._normalized_url(
+            toolkit.config.get(TARGET_PUBLIC_URL_CONFIG)
+            or DEFAULT_TARGET_PUBLIC_URL
+        )
+
+    @staticmethod
+    def _normalized_url(value):
+        return value.strip().rstrip("/") + "/"
                     
 
 

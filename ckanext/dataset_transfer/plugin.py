@@ -4,6 +4,7 @@ from flask import Blueprint
 from ckanext.dataset_transfer.controllers.base import BaseController
 
 
+@toolkit.blanket.config_declarations
 class DatasetTransferPlugin(plugins.SingletonPlugin):
     plugins.implements(plugins.IConfigurer)
     plugins.implements(plugins.IBlueprint)
@@ -57,5 +58,6 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
     def get_helpers(self):
         return {'is_dataset_published': BaseController.is_dataset_published,
                 'get_published_doi_and_url': BaseController.get_published_doi_and_url,
+                'get_transfer_status': BaseController.get_transfer_status,
                 'get_org_name': BaseController.which_sfb
         }
