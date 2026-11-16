@@ -119,29 +119,28 @@ class Helper():
         original LUH destination only. New and custom deployments must set the
         organization explicitly.
         """
-        configured = (
-            toolkit.config.get(TARGET_ORGANIZATION_CONFIG) or ""
+        configured_org = (
+                toolkit.config.get("ckanext.dataset_transfer.target_organization")
+                or ""
         ).strip()
-        if configured:
-            return configured
 
-        if not Helper._uses_original_luh_destination():
+        if configured_org:
+            return configured_org
+
+        # Legacy fallback only for the default LUH destination
+        target_url = Helper.get_target_api_url()
+
+        if target_url != DEFAULT_TARGET_API_URL:
             return ""
 
         root_path = toolkit.config.get("ckan.root_path") or ""
-        legacy_mappings = (
-            ("sfb1368/ckan", "sfb_1368"),
-            ("sfb1153/ckan", "sfb_1153"),
-        )
-        for root_fragment, organization in legacy_mappings:
-            if root_fragment in root_path:
-                log.warning(
-                    "Using deprecated ckan.root_path fallback for dataset "
-                    "transfer organization %s; configure %s explicitly.",
-                    organization,
-                    TARGET_ORGANIZATION_CONFIG,
-                )
-                return organization
+
+        if root_path.startswith("/sfb1368/"):
+            return "sfb_1368"
+
+        if root_path.startswith("/sfb1153/"):
+            return "sfb_1153"
+
         return ""
 
     @staticmethod
