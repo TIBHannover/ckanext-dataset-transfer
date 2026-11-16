@@ -1,5 +1,6 @@
 # encoding: utf-8
 
+import logging
 import queue
 from threading import Thread
 
@@ -12,6 +13,8 @@ TARGET_API_URL_CONFIG = "ckanext.dataset_transfer.target_api_url"
 TARGET_PUBLIC_URL_CONFIG = "ckanext.dataset_transfer.target_public_url"
 DEFAULT_TARGET_API_URL = "https://data.uni-hannover.de/api/3/action/"
 DEFAULT_TARGET_PUBLIC_URL = "https://data.uni-hannover.de/"
+
+log = logging.getLogger(__name__)
 
 
 class Helper():
@@ -110,8 +113,36 @@ class Helper():
 
 
     def get_organization_id():
-        """Return the configured organization on the destination CKAN."""
-        return (toolkit.config.get(TARGET_ORGANIZATION_CONFIG) or "").strip()
+        """Return the configured destination organization.
+
+        The root-path lookup is a temporary compatibility fallback for the
+        original LUH destination only. New and custom deployments must set the
+        organization explicitly.
+        """
+        configured = (
+            toolkit.config.get(TARGET_ORGANIZATION_CONFIG) or ""
+        ).strip()
+        if configured:
+            return configured
+
+        if not Helper._uses_original_luh_destination():
+            return ""
+
+        root_path = toolkit.config.get("ckan.root_path") or ""
+        legacy_mappings = (
+            ("sfb1368/ckan", "sfb_1368"),
+            ("sfb1153/ckan", "sfb_1153"),
+        )
+        for root_fragment, organization in legacy_mappings:
+            if root_fragment in root_path:
+                log.warning(
+                    "Using deprecated ckan.root_path fallback for dataset "
+                    "transfer organization %s; configure %s explicitly.",
+                    organization,
+                    TARGET_ORGANIZATION_CONFIG,
+                )
+                return organization
+        return ""
 
     @staticmethod
     def get_target_api_url():
@@ -124,6 +155,15 @@ class Helper():
         return Helper._normalized_url(
             toolkit.config.get(TARGET_PUBLIC_URL_CONFIG)
             or DEFAULT_TARGET_PUBLIC_URL
+        )
+
+    @staticmethod
+    def _uses_original_luh_destination():
+        return (
+            Helper.get_target_api_url()
+            == Helper._normalized_url(DEFAULT_TARGET_API_URL)
+            and Helper.get_target_public_url()
+            == Helper._normalized_url(DEFAULT_TARGET_PUBLIC_URL)
         )
 
     @staticmethod

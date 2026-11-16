@@ -114,24 +114,119 @@ def test_ajax_posts_use_ckan_csrf_meta_token():
 
 
 @pytest.mark.parametrize(
-    "root_path",
-    [None, "/sfb1153/ckan", "/sfb1368/ckan", "/unrelated/reverse-proxy"],
+    "organization",
+    ["sfb_1153", "sfb_1368", "verified-trr375-luh-organization"],
 )
-def test_target_organization_is_independent_of_root_path(monkeypatch, root_path):
+def test_explicit_target_organization_is_used(monkeypatch, organization):
     import ckan.plugins.toolkit as toolkit
     from ckanext.dataset_transfer.libs.helper import Helper
 
     monkeypatch.setitem(
         toolkit.config,
         "ckanext.dataset_transfer.target_organization",
-        " configured-destination ",
+        " {} ".format(organization),
     )
-    if root_path is None:
-        monkeypatch.delitem(toolkit.config, "ckan.root_path", raising=False)
-    else:
-        monkeypatch.setitem(toolkit.config, "ckan.root_path", root_path)
+    monkeypatch.setitem(toolkit.config, "ckan.root_path", "/sfb1153/ckan")
 
-    assert Helper.get_organization_id() == "configured-destination"
+    assert Helper.get_organization_id() == organization
+
+
+@pytest.mark.parametrize(
+    "root_path,organization",
+    [
+        ("/sfb1153/ckan", "sfb_1153"),
+        ("/sfb1368/ckan", "sfb_1368"),
+    ],
+)
+def test_legacy_target_organization_fallback_for_original_luh(
+    monkeypatch, caplog, root_path, organization
+):
+    import logging
+    import ckan.plugins.toolkit as toolkit
+    from ckanext.dataset_transfer.libs.helper import Helper
+
+    monkeypatch.delitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_organization",
+        raising=False,
+    )
+    monkeypatch.delitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_api_url",
+        raising=False,
+    )
+    monkeypatch.delitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_public_url",
+        raising=False,
+    )
+    monkeypatch.setitem(toolkit.config, "ckan.root_path", root_path)
+
+    with caplog.at_level(logging.WARNING):
+        assert Helper.get_organization_id() == organization
+
+    assert "deprecated ckan.root_path fallback" in caplog.text
+    assert "target_organization" in caplog.text
+
+
+def test_explicit_target_organization_overrides_legacy_mapping(monkeypatch):
+    import ckan.plugins.toolkit as toolkit
+    from ckanext.dataset_transfer.libs.helper import Helper
+
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_organization",
+        "explicit-destination",
+    )
+    monkeypatch.setitem(toolkit.config, "ckan.root_path", "/sfb1153/ckan")
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_api_url",
+        "https://custom.example/api/3/action/",
+    )
+
+    assert Helper.get_organization_id() == "explicit-destination"
+
+
+@pytest.mark.parametrize(
+    "root_path,api_url,public_url",
+    [
+        ("/unknown/ckan", None, None),
+        ("/trr375/ckan", None, None),
+        (
+            "/sfb1153/ckan",
+            "https://custom.example/api/3/action/",
+            None,
+        ),
+        (
+            "/sfb1368/ckan",
+            None,
+            "https://custom.example/",
+        ),
+    ],
+)
+def test_missing_target_organization_does_not_guess(
+    monkeypatch, root_path, api_url, public_url
+):
+    import ckan.plugins.toolkit as toolkit
+    from ckanext.dataset_transfer.libs.helper import Helper
+
+    monkeypatch.delitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_organization",
+        raising=False,
+    )
+    monkeypatch.setitem(toolkit.config, "ckan.root_path", root_path)
+    for key, value in (
+        ("ckanext.dataset_transfer.target_api_url", api_url),
+        ("ckanext.dataset_transfer.target_public_url", public_url),
+    ):
+        if value is None:
+            monkeypatch.delitem(toolkit.config, key, raising=False)
+        else:
+            monkeypatch.setitem(toolkit.config, key, value)
+
+    assert Helper.get_organization_id() == ""
 
 
 def test_destination_urls_are_configurable_and_normalized(monkeypatch):
@@ -594,6 +689,17 @@ def test_luh_publish_fails_closed_without_target_organization(app, monkeypatch):
         "ckanext.dataset_transfer.target_organization",
         raising=False,
     )
+    monkeypatch.setitem(toolkit.config, "ckan.root_path", "/unknown/ckan")
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_api_url",
+        "https://custom.example/api/3/action/",
+    )
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_public_url",
+        "https://custom.example/",
+    )
     monkeypatch.setattr(
         base.Helper, "check_access_edit_package", lambda package_id: True
     )
@@ -610,6 +716,7 @@ def test_luh_publish_fails_closed_without_target_organization(app, monkeypatch):
 
     assert response.status_code == 500
     assert response.json["error"] == "Missing configuration"
+    assert "target_organization" in response.json["message"]
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
