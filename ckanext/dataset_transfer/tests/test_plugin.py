@@ -136,6 +136,9 @@ def test_explicit_target_organization_is_used(monkeypatch, organization):
     [
         ("/sfb1153/ckan", "sfb_1153"),
         ("/sfb1368/ckan", "sfb_1368"),
+        ("/sfb1153/{{LANG}}", "sfb_1153"),
+        ("/sfb1368/{{LANG}}", "sfb_1368"),
+        (" /sfb1368/{{LANG}}/ ", "sfb_1368"),
     ],
 )
 def test_legacy_target_organization_fallback_for_original_luh(
@@ -193,6 +196,11 @@ def test_explicit_target_organization_overrides_legacy_mapping(monkeypatch):
     [
         ("/unknown/ckan", None, None),
         ("/trr375/ckan", None, None),
+        ("/trr375/{{LANG}}", None, None),
+        ("/not-sfb1368/{{LANG}}", None, None),
+        ("/sfb1368-other/{{LANG}}", None, None),
+        ("/proxy/sfb1368/{{LANG}}", None, None),
+        ("/sfb1368/unexpected", None, None),
         (
             "/sfb1153/ckan",
             "https://custom.example/api/3/action/",

@@ -119,29 +119,38 @@ class Helper():
         original LUH destination only. New and custom deployments must set the
         organization explicitly.
         """
-        configured_org = (
-                toolkit.config.get("ckanext.dataset_transfer.target_organization")
-                or ""
+        configured = (
+            toolkit.config.get(TARGET_ORGANIZATION_CONFIG) or ""
         ).strip()
+        if configured:
+            return configured
 
-        if configured_org:
-            return configured_org
-
-        # Legacy fallback only for the default LUH destination
-        target_url = Helper.get_target_api_url()
-
-        if target_url != DEFAULT_TARGET_API_URL:
+        if not Helper._uses_original_luh_destination():
             return ""
 
         root_path = toolkit.config.get("ckan.root_path") or ""
+        organization = Helper._legacy_organization_from_root_path(root_path)
+        if organization:
+            log.warning(
+                "Using deprecated ckan.root_path fallback for dataset "
+                "transfer organization %s; configure %s explicitly.",
+                organization,
+                TARGET_ORGANIZATION_CONFIG,
+            )
+        return organization
 
-        if root_path.startswith("/sfb1368/"):
-            return "sfb_1368"
-
-        if root_path.startswith("/sfb1153/"):
-            return "sfb_1153"
-
-        return ""
+    @staticmethod
+    def _legacy_organization_from_root_path(root_path):
+        segments = tuple(
+            segment for segment in root_path.strip().split("/") if segment
+        )
+        mappings = {
+            ("sfb1153", "ckan"): "sfb_1153",
+            ("sfb1153", "{{LANG}}"): "sfb_1153",
+            ("sfb1368", "ckan"): "sfb_1368",
+            ("sfb1368", "{{LANG}}"): "sfb_1368",
+        }
+        return mappings.get(segments, "")
 
     @staticmethod
     def get_target_api_url():
