@@ -1,14 +1,22 @@
 <section id="publish_step1" class="publish-entry-step" aria-live="polite">
   <div id="publish_target_details" hidden>
     <div class="publish-numbered-section luh-only">
-      <span class="publish-step-number" aria-hidden="true">2</span>
+
       <div class="publish-step-content">
         <h3>{{ _('Requirements for LUH data repository') }}</h3>
-        <p class="publish-requirement">{{ _('A personal API token from your LUH data repository account. You find it in your account settings there.') }}</p>
+        <p class="publish-requirement">
+          {{ _('A personal API token from your') }}
+          <a href="{{ h.get_target_public_url() }}"
+          target="_blank"
+          rel="noopener noreferrer">
+          {{ _('LUH Data Repository') }}
+          </a>.
+          {{ _('You find it in your account settings there.') }}
+      </p>
       </div>
     </div>
     <div class="publish-numbered-section luh-only" id="luh_api_token_section">
-      <span class="publish-step-number" aria-hidden="true">3</span>
+
       <div class="publish-step-content">
         <h3>{{ _('API token') }}</h3>
         {% if stored_api_token.available %}

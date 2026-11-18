@@ -9,7 +9,7 @@
   <div id="publish_destination_selection" data-radar-transferred="{{ 'true' if transfer_status.radar else 'false' }}">
     <div class="row"><h2 class="modal-title">{{ _('Publish the dataset') }} <span id="publish_page_dataset_name_in_title">{{ pkg_dict.title }}</span></h2></div>
     <div class="publish-numbered-section">
-      <span class="publish-step-number" aria-hidden="true">1</span>
+
       <div class="publish-step-content">
         <h3 class="publish-section-heading"><label for="publish_target">{{ _('Publish target') }}</label></h3>
         <select class="form-control" id="publish_target" name="publish_target">
@@ -34,9 +34,13 @@
     <div class="col-sm-12 publish-action-bar">
       <button id="dataset_transfer_back_btn" class="btn btn-default" type="button">{{ _('Back') }}</button>
       <div class="publish-primary-actions">
-        <a href="{{ h.url_for('dataset.read', id=pkg_dict['name'], _external=True) }}" id="dataset_transfer_cancel_btn" class="btn btn-default">{{ _('Cancel') }}</a>
-        <button type="submit" id="dataset_transfer_submit" class="btn btn-success org_should_exist" step="2">{{ _('Publish') }}</button>
-        <button id="dataset_transfer_next_btn" class="btn btn-primary org_should_exist" step="2">{{ _('Publish') }}</button>
+        <a href="{{ h.url_for('dataset.read', id=pkg_dict['name'], _external=True) }}" id="dataset_transfer_cancel_btn"
+           style="display: inline-flex; align-items: center; justify-content: center;"
+           class="btn btn-default">{{ _('Cancel') }}</a>
+        <button type="submit" id="dataset_transfer_submit" class="btn btn-success org_should_exist"
+                style="display: inline-flex; align-items: center; justify-content: center;" step="2">{{ _('Publish') }}</button>
+        <button id="dataset_transfer_next_btn" class="btn btn-primary org_should_exist"
+                step="2" style="display: inline-flex; align-items: center; justify-content: center;">{{ _('Publish') }}</button>
       </div>
     </div>
   </div>

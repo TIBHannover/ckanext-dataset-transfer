@@ -2,6 +2,7 @@ import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
 from flask import Blueprint
 from ckanext.dataset_transfer.controllers.base import BaseController
+from ckanext.dataset_transfer.libs.helper import Helper
 
 
 @toolkit.blanket.config_declarations
@@ -59,5 +60,6 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
         return {'is_dataset_published': BaseController.is_dataset_published,
                 'get_published_doi_and_url': BaseController.get_published_doi_and_url,
                 'get_transfer_status': BaseController.get_transfer_status,
-                'get_org_name': BaseController.which_sfb
+                'get_org_name': BaseController.which_sfb,
+                'get_target_public_url': Helper.get_target_public_url,
         }
