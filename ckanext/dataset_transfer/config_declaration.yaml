@@ -1,0 +1,10 @@
+version: 1
+groups:
+  - annotation: Dataset transfer destination settings
+    options:
+      - key: ckanext.dataset_transfer.target_organization
+        description: Required verified organization identifier on the destination CKAN instance. A deprecated root-path fallback exists only for SFB1153 and SFB1368 transfers to the original LUH repository.
+      - key: ckanext.dataset_transfer.target_api_url
+        description: Destination CKAN action API base URL, ending in /api/3/action/. Defaults to the original LUH repository.
+      - key: ckanext.dataset_transfer.target_public_url
+        description: Public base URL used to construct destination dataset links. Defaults to the original LUH repository.

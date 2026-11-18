@@ -4,6 +4,7 @@ from flask import Blueprint
 from ckanext.dataset_transfer.controllers.base import BaseController
 
 
+@toolkit.blanket.config_declarations
 class DatasetTransferPlugin(plugins.SingletonPlugin):
     plugins.implements(plugins.IConfigurer)
     plugins.implements(plugins.IBlueprint)

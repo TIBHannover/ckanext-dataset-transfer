@@ -1,10 +1,20 @@
 # encoding: utf-8
 
+import logging
 import queue
 from threading import Thread
 
 import requests
 import ckan.plugins.toolkit as toolkit
+
+
+TARGET_ORGANIZATION_CONFIG = "ckanext.dataset_transfer.target_organization"
+TARGET_API_URL_CONFIG = "ckanext.dataset_transfer.target_api_url"
+TARGET_PUBLIC_URL_CONFIG = "ckanext.dataset_transfer.target_public_url"
+DEFAULT_TARGET_API_URL = "https://data.uni-hannover.de/api/3/action/"
+DEFAULT_TARGET_PUBLIC_URL = "https://data.uni-hannover.de/"
+
+log = logging.getLogger(__name__)
 
 
 class Helper():
@@ -103,13 +113,70 @@ class Helper():
 
 
     def get_organization_id():
-        ckan_root_path = toolkit.config.get('ckan.root_path')
-        if  ckan_root_path and 'sfb1368/ckan' in ckan_root_path:
-            return "sfb_1368"
-        elif ckan_root_path and 'sfb1153/ckan' in ckan_root_path:
-            return "sfb_1153"
-        else:
-            return "" 
+        """Return the configured destination organization.
+
+        The root-path lookup is a temporary compatibility fallback for the
+        original LUH destination only. New and custom deployments must set the
+        organization explicitly.
+        """
+        configured = (
+            toolkit.config.get(TARGET_ORGANIZATION_CONFIG) or ""
+        ).strip()
+        if configured:
+            return configured
+
+        if not Helper._uses_original_luh_destination():
+            return ""
+
+        root_path = toolkit.config.get("ckan.root_path") or ""
+        organization = Helper._legacy_organization_from_root_path(root_path)
+        if organization:
+            log.warning(
+                "Using deprecated ckan.root_path fallback for dataset "
+                "transfer organization %s; configure %s explicitly.",
+                organization,
+                TARGET_ORGANIZATION_CONFIG,
+            )
+        return organization
+
+    @staticmethod
+    def _legacy_organization_from_root_path(root_path):
+        segments = tuple(
+            segment for segment in root_path.strip().split("/") if segment
+        )
+        mappings = {
+            ("sfb1153", "ckan"): "sfb_1153",
+            ("sfb1153", "{{LANG}}"): "sfb_1153",
+            ("sfb1368", "ckan"): "sfb_1368",
+            ("sfb1368", "{{LANG}}"): "sfb_1368",
+        }
+        return mappings.get(segments, "")
+
+    @staticmethod
+    def get_target_api_url():
+        return Helper._normalized_url(
+            toolkit.config.get(TARGET_API_URL_CONFIG) or DEFAULT_TARGET_API_URL
+        )
+
+    @staticmethod
+    def get_target_public_url():
+        return Helper._normalized_url(
+            toolkit.config.get(TARGET_PUBLIC_URL_CONFIG)
+            or DEFAULT_TARGET_PUBLIC_URL
+        )
+
+    @staticmethod
+    def _uses_original_luh_destination():
+        return (
+            Helper.get_target_api_url()
+            == Helper._normalized_url(DEFAULT_TARGET_API_URL)
+            and Helper.get_target_public_url()
+            == Helper._normalized_url(DEFAULT_TARGET_PUBLIC_URL)
+        )
+
+    @staticmethod
+    def _normalized_url(value):
+        return value.strip().rstrip("/") + "/"
                     
 
 

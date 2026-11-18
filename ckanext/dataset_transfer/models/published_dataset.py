@@ -1,6 +1,7 @@
 # encoding: utf-8
 
 import datetime
+import sqlalchemy as sa
 from sqlalchemy import Column, Table
 from sqlalchemy import types as _types
 from ckan.model import meta, domain_object
@@ -22,6 +23,7 @@ published_dataset_table = Table(
 class PublishedDataset(domain_object.DomainObject):
     TARGET_ID_PREFIX = u"dataset-transfer-target:"
     RADAR_INCOMPLETE_PREFIX = u"dataset-transfer-radar-incomplete:"
+    LUH_INCOMPLETE_PREFIX = u"dataset-transfer-luh-incomplete:"
 
     def __init__(self, dataset_id=None, doi=None, published_url=None, publish_time=None,
                  published_dataset_id=None):
@@ -67,6 +69,23 @@ class PublishedDataset(domain_object.DomainObject):
         ).autoflush(autoflush).first()
 
     @classmethod
+    def get_incomplete_luh_transfer(cls, id, autoflush=True):
+        if not id:
+            return None
+        return meta.Session.query(cls).filter(
+            cls.dataset_id == id,
+            cls.published_dataset_id.like(cls.LUH_INCOMPLETE_PREFIX + u"%"),
+        ).autoflush(autoflush).first()
+
+    @classmethod
+    def acquire_publish_lock(cls, dataset_id, target):
+        """Serialize publication attempts across CKAN worker processes."""
+        meta.Session.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": u"dataset-transfer:{}:{}".format(target, dataset_id)},
+        )
+
+    @classmethod
     def get_all_by_dataset(cls, id, autoflush=True):
         if not id:
             return []
@@ -100,6 +119,12 @@ class PublishedDataset(domain_object.DomainObject):
         )
 
     @classmethod
+    def encode_incomplete_luh_id(cls, status, published_dataset_id):
+        return cls.LUH_INCOMPLETE_PREFIX + status + u":" + (
+            published_dataset_id or u""
+        )
+
+    @classmethod
     def decode_incomplete_radar_id(cls, value):
         value = value or u""
         if not value.startswith(cls.RADAR_INCOMPLETE_PREFIX):
@@ -113,6 +138,19 @@ class PublishedDataset(domain_object.DomainObject):
             "published_dataset_id": published_dataset_id,
         }
 
+    @classmethod
+    def decode_incomplete_luh_id(cls, value):
+        value = value or u""
+        if not value.startswith(cls.LUH_INCOMPLETE_PREFIX):
+            return None
+        remainder = value[len(cls.LUH_INCOMPLETE_PREFIX):]
+        status, separator, published_dataset_id = remainder.partition(u":")
+        if not separator:
+            return None
+        return {
+            "status": status,
+            "published_dataset_id": published_dataset_id,
+        }
 
 
 meta.mapper(
