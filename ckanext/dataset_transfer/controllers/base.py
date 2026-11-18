@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import os
+from urllib.parse import urlparse
 
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
@@ -94,7 +95,20 @@ class BaseController():
                 package, project_id, award_number
             ),
             transfer_status=BaseController.get_transfer_status(package["id"]),
+            stored_api_token=BaseController.stored_api_token_info(),
         )
+
+    @staticmethod
+    def stored_api_token_info():
+        """Return only presentation-safe metadata for the current user's token."""
+        info = {"available": False, "suffix": ""}
+        if not getattr(toolkit.g, "user", None):
+            return info
+        record = PublishApiToken.get_by_user(toolkit.g.userobj.id)
+        if not record:
+            return info
+        token = record.api_token or ""
+        return {"available": True, "suffix": token[-4:] if token else ""}
 
 
 
@@ -329,6 +343,10 @@ class BaseController():
             
             else:
                 # get the api token from user
+                if not api_token or not api_token.strip():
+                    return BaseController._error_response(
+                        "Invalid request", "A LUH API token is required.", 400
+                    )
                 if save_api_token == "true":
                     # delete the old one if exist
                     if BaseController.user_has_api_token() == "True":
@@ -387,7 +405,7 @@ class BaseController():
             dataset_to_publish["isopen"] = True
             dataset_to_publish["private"] = False
             dataset_to_publish["owner_org"] = org_answer['result']['id']
-            dataset_to_publish['id'] = ""
+            dataset_to_publish.pop("id", None)
             dataset_to_publish['terms_of_usage'] = "Yes"
             dataset_to_publish['have_copyright'] = "Yes"
             headers["Content-Type"] = "application/json"
@@ -618,10 +636,16 @@ class BaseController():
             "target": target or "legacy",
             "status": transfer_status,
             "doi": record.doi or "",
-            "published_url": record.published_url or "",
+            "published_url": BaseController._safe_published_url(record.published_url),
             "published_dataset_id": published_dataset_id,
             "publish_time": publish_time,
         }
+
+    @staticmethod
+    def _safe_published_url(value):
+        value = value or ""
+        parsed = urlparse(value)
+        return value if parsed.scheme in ("http", "https") and parsed.netloc else ""
 
     @staticmethod
     def get_transfer_status(dataset_id):

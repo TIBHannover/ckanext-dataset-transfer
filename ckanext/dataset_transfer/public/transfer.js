@@ -1,6 +1,5 @@
 $(document).ready(function(){
     
-    check_user_has_api_token_and_show_message();
     update_publish_target_fields();
 
     /**
@@ -18,14 +17,10 @@ $(document).ready(function(){
                 return;
             }
             // console.info($('#token_exist_box').is(':checked'))
-            if($('#token_exist_box').prop('checked') === false && $('#transfer_api_token_input').val() === ""){                
+            if($('#token_exist_box').val() !== 'true' && !$.trim($('#transfer_api_token_input').val())){
                 $('#api_token_input_empty_alert_box').show();
             }
-            else if ($('#token_exist_box').prop('checked') === true){
-                check_user_has_api_token();
-            }
             else{
-                // GoToStep2();
                 $('#publish_step1').hide();
                 $('#publish_destination_selection').hide();
                 $('#publish_step2').show();
@@ -117,9 +112,9 @@ $(document).ready(function(){
         let formdata = new FormData();
         formdata.set('package_id', $('#package_id').val());        
         formdata.set('publish_target', $('#publish_target').val());
-        formdata.set('api_token', $("#transfer_api_token_input").val());
-        formdata.set('save_api_token_box', $("#save_api_token_box").prop('checked'));
-        formdata.set('token_exist_box', $("#token_exist_box").prop('checked'));
+        formdata.set('api_token', $('#publish_target').val() === 'luh' ? $("#transfer_api_token_input").val() : '');
+        formdata.set('save_api_token_box', $('#publish_target').val() === 'luh' && $("#save_api_token_box").prop('checked'));
+        formdata.set('token_exist_box', $('#publish_target').val() === 'luh' ? $("#token_exist_box").val() : 'false');
         formdata.set('terms_of_usage', $("#terms_of_usage").prop('checked'));
         formdata.set('rights_of_use', $("#rights_of_use").prop('checked'));
         if($('#publish_target').val() === 'radar'){
@@ -197,19 +192,18 @@ $(document).ready(function(){
     /**
      * Check the "use existing token checkbox"
      */
-    $('#token_exist_box').click(function(){
+    $('input[name="api_token_choice"]').change(function(){
         $('#api_token_input_empty_alert_box').hide();
-        $('#api_token_not_exist_alert_box').hide();
-        if($(this).prop('checked') === true){
-            $("#transfer_api_token_input").prop('disabled', true);
-            $("#save_api_token_box").prop('disabled', true);
-            $("#save_api_token_box").closest('label').css('color', "gray");
-            $("#save_api_token_box").prop('checked', false);
+        if($(this).val() === 'saved'){
+            $('#token_exist_box').val('true');
+            $('#new_api_token_controls').prop('hidden', true);
+            $('#transfer_api_token_input').val('');
+            $('#save_api_token_box').prop('checked', false);
         }
         else{
-            $("#transfer_api_token_input").prop('disabled', false);
-            $("#save_api_token_box").prop('disabled', false);
-            $("#save_api_token_box").closest('label').css('color', "#333333");
+            $('#token_exist_box').val('false');
+            $('#new_api_token_controls').prop('hidden', false);
+            $('#transfer_api_token_input').trigger('focus');
         }
     });
 
@@ -258,28 +252,32 @@ function update_publish_target_fields(){
     $('#publish_step1').show();
     $('#dataset_transfer_next_btn').show().attr('step', '2');
     $('#dataset_transfer_submit, #dataset_transfer_back_btn').hide();
-    if(!$('#publish_target').val()){
-        $('#dataset_transfer_next_btn').prop('disabled', true);
+    let target = $('#publish_target').val();
+    let description = $('#publish_target_description');
+    if(!target){
+        description.text(description.data('initial'));
+        $('#publish_target_details').prop('hidden', true);
+        $('#action_btn_part').hide();
         return;
     }
+    $('#publish_target_details').prop('hidden', false);
+    $('#action_btn_part').show();
     $('#dataset_transfer_next_btn').prop('disabled', false);
-    if($('#publish_target').val() === "radar"){
+    if(target === "radar"){
+        description.text(description.data('radar'));
         $('.luh-only').hide();
         $('.radar-only').show();
-        $('#transfer_api_token_input').closest('.form-group').hide();
-        $('#save_api_token_box').closest('label').hide();
-        $('#token_exist_box').closest('label').hide();
-        $('#api_token_exist_info_box').hide();
-        $('#api_token_not_exist_alert_box').hide();
         $('#api_token_input_empty_alert_box').hide();
+        $('#dataset_transfer_next_btn').text('Continue');
+        if($('#publish_destination_selection').data('radar-transferred') === true){
+            $('#dataset_transfer_next_btn').prop('disabled', true).text('Publish');
+        }
     }
     else{
+        description.text(description.data('luh'));
         $('.luh-only').show();
         $('.radar-only').hide();
-        $('#transfer_api_token_input').closest('.form-group').show();
-        $('#save_api_token_box').closest('label').show();
-        $('#token_exist_box').closest('label').show();
-        check_user_has_api_token_and_show_message();
+        $('#dataset_transfer_next_btn').text('Publish');
     }
 }
 
