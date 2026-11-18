@@ -11,7 +11,7 @@
     <div class="publish-numbered-section">
       <span class="publish-step-number" aria-hidden="true">1</span>
       <div class="publish-step-content">
-        <label for="publish_target" class="publish-section-label">{{ _('Publish target') }}</label>
+        <h3 class="publish-section-heading"><label for="publish_target">{{ _('Publish target') }}</label></h3>
         <select class="form-control" id="publish_target" name="publish_target">
           <option value="" selected>{{ _('Select a publish target') }}</option>
           <option value="luh">{{ _('LUH data repository') }}</option>
@@ -31,11 +31,13 @@
   {% snippet "snippets/dataset_publish_result_section.html", pkg_dict=pkg_dict %}
   <div class="row" id="action_btn_part">
     <br><hr>
-    <div class="col-sm-12">
-      <button type="submit" id="dataset_transfer_submit" class="btn btn-success pull-right org_should_exist" step="2">{{ _('Publish') }}</button>
-      <button id="dataset_transfer_next_btn" class="btn btn-primary pull-right org_should_exist" step="2">{{ _('Publish') }}</button>
-      <a href="{{ h.url_for('dataset.read', id=pkg_dict['name'], _external=True) }}" id="dataset_transfer_cancel_btn" class="btn btn-default pull-right">{{ _('Cancel') }}</a>
-      <button id="dataset_transfer_back_btn" class="btn btn-default pull-left" type="button">{{ _('Back') }}</button>
+    <div class="col-sm-12 publish-action-bar">
+      <button id="dataset_transfer_back_btn" class="btn btn-default" type="button">{{ _('Back') }}</button>
+      <div class="publish-primary-actions">
+        <a href="{{ h.url_for('dataset.read', id=pkg_dict['name'], _external=True) }}" id="dataset_transfer_cancel_btn" class="btn btn-default">{{ _('Cancel') }}</a>
+        <button type="submit" id="dataset_transfer_submit" class="btn btn-success org_should_exist" step="2">{{ _('Publish') }}</button>
+        <button id="dataset_transfer_next_btn" class="btn btn-primary org_should_exist" step="2">{{ _('Publish') }}</button>
+      </div>
     </div>
   </div>
 {% endblock %}

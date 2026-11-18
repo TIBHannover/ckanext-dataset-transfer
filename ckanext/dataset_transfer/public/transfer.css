@@ -26,24 +26,27 @@
 }
 
 .publish-step-content { flex: 1; min-width: 0; }
-.publish-step-content h3, .publish-section-label { font-size: 21px; font-weight: bold; line-height: 1.3; margin: 2px 0 8px; }
-#publish_target { height: 50px; font-size: 20px; }
-#publish_target_description { font-size: 17px; }
-.publish-requirement { background: #f2f2f4; font-size: 17px; padding: 12px 18px; }
-.publish-token-option { align-items: center; display: flex; font-size: 18px; justify-content: space-between; margin: 14px 0; }
+.publish-step-content h3 { margin: 2px 0 8px; }
+.publish-section-heading label { margin: 0; }
+.publish-requirement { background: #f2f2f4; padding: 12px 18px; }
+.publish-token-option { align-items: center; display: flex; justify-content: space-between; margin: 14px 0; }
 .stored-token-mask { color: #687080; margin-right: 10%; }
 #new_api_token_controls { margin-left: 42px; }
-.publish-overwrite-option { font-size: 17px; margin-top: 10px; }
+.publish-overwrite-option { margin-top: 10px; }
 .publish-overwrite-option .help-block { margin-left: 20px; }
 .publish-transfer-notice { align-items: flex-start; border: 1px solid #aeb5c0; display: flex; gap: 20px; padding: 18px 22px; }
 .publish-info-icon { border: 2px solid #503b98; border-radius: 50%; color: #503b98; flex: 0 0 36px; font-size: 24px; line-height: 32px; text-align: center; }
-#action_btn_part .pull-right { margin-left: 12px; min-width: 120px; }
+.publish-action-bar { align-items: center; display: flex; }
+.publish-primary-actions { display: flex; gap: 12px; margin-left: auto; }
+.publish-primary-actions .btn { min-width: 120px; }
 
 @media (max-width: 767px) {
   .publish-numbered-section { gap: 10px; }
   .stored-token-mask { display: block; margin: 5px 0 0 24px; }
   .publish-token-option { display: block; }
   #new_api_token_controls { margin-left: 0; }
+  .publish-action-bar { align-items: stretch; flex-wrap: wrap; gap: 10px; }
+  .publish-primary-actions { justify-content: flex-end; width: 100%; }
 }
 
 #publish_radar_metadata_step, #publish_step2, #publish_step3, #publish_step_final, #publish_result_section, #publish_failed_section{
