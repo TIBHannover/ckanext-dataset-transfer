@@ -3,6 +3,8 @@
 import copy
 import json
 import logging
+import os
+from urllib.parse import urlparse
 
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
@@ -10,6 +12,22 @@ from flask import Response, request, render_template
 import ckan.plugins.toolkit as toolkit
 from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
+from ckanext.dataset_transfer.services.radar import (
+    RadarConfigError,
+    RadarPublishError,
+    RadarPublisher,
+)
+from ckanext.dataset_transfer.services.radar_metadata_mapping import (
+    VOCABULARIES,
+    apply_fixed_radar_metadata,
+    fixed_radar_metadata_errors,
+    map_ckan_to_radar,
+    normalize_reviewed_metadata,
+    validate_radar_metadata,
+)
+from ckanext.dataset_transfer.services.radar_reference_mapping import (
+    get_ckan_reference_descriptions,
+)
 from datetime import datetime as _time
 
 
@@ -128,11 +146,45 @@ class BaseController():
         if not Helper.check_access_edit_package(package['id']):
                 return toolkit.abort(403, "Not Authorized")
         
-        if(BaseController.is_dataset_published(package['id'])):
-                # dataset is already published
-                toolkit.abort(400, "This dataset is already published")
+        configured_publisher = toolkit.config.get(
+            "ckanext.dataset_transfer.radar.publisher"
+        ) or os.environ.get("CKANEXT_DATASET_TRANSFER_RADAR_PUBLISHER")
+        project_id = toolkit.config.get("ckanext.crc.project.id") or os.environ.get(
+            "CKANEXT__CRC__PROJECT__ID"
+        )
+        award_number = toolkit.config.get(
+            "ckanext.dataset_transfer.radar.dfg_award_number"
+        ) or os.environ.get("CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER")
+        radar_metadata = map_ckan_to_radar(
+            package,
+            configured_publisher,
+            project_id=project_id,
+            dfg_award_number=award_number,
+            reference_descriptions=get_ckan_reference_descriptions(package),
+        )
+        return render_template(
+            'publish_page.html',
+            pkg=package,
+            pkg_dict=package,
+            stored_api_token=BaseController.stored_api_token_info(),
+            transfer_status=BaseController.get_transfer_status(package["id"]),
+            radar_metadata=radar_metadata,
+            radar_vocabularies=VOCABULARIES,
+            radar_policy_errors=fixed_radar_metadata_errors(
+                package, project_id, award_number
+            ),
+        )
 
-        return render_template('publish_page.html', pkg=package, pkg_dict=package)
+    @staticmethod
+    def stored_api_token_info():
+        """Return only presentation-safe metadata for the current user's token."""
+        if not getattr(toolkit.g, "user", None):
+            return {"available": False, "suffix": ""}
+        record = PublishApiToken.get_by_user(toolkit.g.userobj.id)
+        if not record:
+            return {"available": False, "suffix": ""}
+        token = record.api_token or ""
+        return {"available": True, "suffix": token[-4:] if token else ""}
 
 
 
@@ -143,11 +195,12 @@ class BaseController():
         '''
         
         try:
-            log.info("Dataset transfer publish request started")
             package_id = request.form.get("package_id")
+            publish_target = request.form.get("publish_target") or "luh"
             log.info(
-                "Dataset transfer publish request accepted package_id=%s user=%s content_type=%s remote_addr=%s form_fields=%s",
+                "Dataset transfer publish request accepted package_id=%s target=%s user=%s content_type=%s remote_addr=%s form_fields=%s",
                 package_id,
+                publish_target,
                 getattr(toolkit.g, "user", ""),
                 request.content_type,
                 request.remote_addr,
@@ -169,27 +222,43 @@ class BaseController():
                     "Not Authorized", "Not Authorized", 403
                 )
 
-            PublishedDataset.acquire_publish_lock(dataset["id"], "luh")
+            if publish_target not in ("luh", "radar"):
+                return BaseController._error_response(
+                    "Invalid publish target",
+                    "Unknown publish target: {}".format(publish_target),
+                    400,
+                )
+
+            PublishedDataset.acquire_publish_lock(dataset["id"], publish_target)
             existing_transfer = PublishedDataset.get_by_dataset_and_target(
-                dataset["id"], "luh"
+                dataset["id"], publish_target
             )
             if existing_transfer:
                 log.warning(
-                    "Dataset transfer rejected package_id=%s reason=already_transferred",
+                    "Dataset transfer rejected package_id=%s target=%s reason=already_transferred",
                     dataset["id"],
+                    publish_target,
                 )
                 return BaseController._error_response(
                     "Already transferred",
-                    "This dataset has already been transferred to LUH.",
+                    "This dataset has already been transferred to {}.".format(
+                        "RADAR4Ing" if publish_target == "radar" else "LUH"
+                    ),
                     409,
                     existing_transfer=BaseController._transfer_record(
                         existing_transfer, serialize=True
                     ),
                 )
-            incomplete_luh_transfer = PublishedDataset.get_incomplete_luh_transfer(
-                dataset["id"]
-            )
-            if incomplete_luh_transfer:
+            incomplete_radar_transfer = None
+            if publish_target == "radar":
+                incomplete_radar_transfer = (
+                    PublishedDataset.get_incomplete_radar_transfer(dataset["id"])
+                )
+            else:
+                incomplete_luh_transfer = PublishedDataset.get_incomplete_luh_transfer(
+                    dataset["id"]
+                )
+            if publish_target == "luh" and incomplete_luh_transfer:
                 return BaseController._error_response(
                     "Incomplete transfer requires reconciliation",
                     "A destination dataset was already created, but its "
@@ -218,6 +287,12 @@ class BaseController():
                     "Terms of usage and rights of use must be accepted.",
                     400
                 )
+
+            if publish_target == "radar":
+                return BaseController._publish_to_radar(
+                    dataset, incomplete_radar_transfer
+                )
+
             org_name = Helper.get_organization_id()
             if not org_name:
                 return BaseController._error_response(
@@ -482,6 +557,129 @@ class BaseController():
                 500,
             )
 
+    @staticmethod
+    def _publish_to_radar(dataset, incomplete_radar_transfer=None):
+        """Validate reviewed metadata and continue through the RADAR publisher."""
+        reviewed_metadata = normalize_reviewed_metadata(
+            request.form.get("radar_metadata")
+        )
+        project_id = toolkit.config.get(
+            "ckanext.crc.project.id"
+        ) or os.environ.get("CKANEXT__CRC__PROJECT__ID")
+        award_number = toolkit.config.get(
+            "ckanext.dataset_transfer.radar.dfg_award_number"
+        ) or os.environ.get(
+            "CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER"
+        )
+        reviewed_metadata = apply_fixed_radar_metadata(
+            reviewed_metadata,
+            dataset,
+            project_id=project_id,
+            dfg_award_number=award_number,
+            reference_descriptions=get_ckan_reference_descriptions(dataset),
+        )
+        validation = validate_radar_metadata(reviewed_metadata)
+        policy_errors = fixed_radar_metadata_errors(
+            dataset, project_id, award_number
+        )
+        if policy_errors:
+            validation["errors"].extend(policy_errors)
+            validation["success"] = False
+        if not validation["success"]:
+            return BaseController._error_response(
+                "RADAR metadata validation failed",
+                "Please correct the highlighted RADAR metadata fields.",
+                400,
+                errors=validation["errors"],
+                warnings=validation["warnings"],
+            )
+
+        try:
+            transfer_state = None
+            if incomplete_radar_transfer:
+                transfer_state = PublishedDataset.decode_incomplete_radar_id(
+                    incomplete_radar_transfer.published_dataset_id
+                )
+                transfer_state["doi"] = incomplete_radar_transfer.doi or ""
+            radar_result = RadarPublisher().publish_dataset(
+                dataset,
+                validation["metadata"],
+                transfer_state=transfer_state,
+            )
+        except RadarConfigError as error:
+            log.exception(
+                "Dataset transfer RADAR configuration failed package_id=%s",
+                dataset.get("id"),
+            )
+            return BaseController._error_response(
+                "RADAR configuration missing", str(error), 400
+            )
+        except RadarPublishError as error:
+            log.exception(
+                "Dataset transfer RADAR publish failed package_id=%s "
+                "dataset_id=%s status=%s missing=%s",
+                dataset.get("id"),
+                error.dataset_id,
+                error.status,
+                error.missing,
+            )
+            if error.dataset_id and error.status:
+                published_url = toolkit.config.get(
+                    "ckanext.dataset_transfer.radar.dataset_url_template", ""
+                )
+                if published_url:
+                    published_url = published_url.format(
+                        dataset_id=error.dataset_id
+                    )
+                if incomplete_radar_transfer:
+                    incomplete_radar_transfer.doi = error.doi or ""
+                    incomplete_radar_transfer.published_url = published_url
+                    incomplete_radar_transfer.published_dataset_id = (
+                        PublishedDataset.encode_incomplete_radar_id(
+                            error.status, error.dataset_id
+                        )
+                    )
+                    incomplete_radar_transfer.save()
+                else:
+                    incomplete_radar_transfer = PublishedDataset(
+                        dataset_id=dataset["id"],
+                        doi=error.doi or "",
+                        published_url=published_url,
+                        published_dataset_id=(
+                            PublishedDataset.encode_incomplete_radar_id(
+                                error.status, error.dataset_id
+                            )
+                        ),
+                        publish_time=_time.now(),
+                    )
+                    incomplete_radar_transfer.save()
+            return BaseController._error_response(
+                "RADAR publish failed",
+                str(error),
+                502,
+                transfer_status=error.status,
+                radar_dataset_id=error.dataset_id,
+                missing_filenames=error.missing,
+            )
+
+        publication = incomplete_radar_transfer or PublishedDataset(
+            dataset_id=dataset["id"], publish_time=_time.now()
+        )
+        publication.doi = radar_result.get("doi") or ""
+        publication.published_url = radar_result["published_url"]
+        publication.published_dataset_id = PublishedDataset.encode_target_id(
+            "radar", radar_result["published_dataset_id"]
+        )
+        publication.save()
+        log.info(
+            "Dataset transfer RADAR publish completed package_id=%s "
+            "radar_dataset_id=%s published_url=%s",
+            dataset.get("id"),
+            radar_result.get("published_dataset_id"),
+            radar_result.get("published_url"),
+        )
+        return BaseController._json_response(radar_result)
+
 
 
 
@@ -527,14 +725,16 @@ class BaseController():
     
 
 
-    def is_dataset_published(id):
+    def is_dataset_published(id, target=None):
         '''
             Check if a dataset is already published ot not.
         '''
 
 
-        db_object = PublishedDataset()
-        answer = db_object.get_by_dataset(id=id)
+        if target:
+            answer = PublishedDataset.get_by_dataset_and_target(id, target)
+        else:
+            answer = PublishedDataset.get_by_dataset(id=id)
         if not answer:
             return False
         return True
@@ -569,10 +769,16 @@ class BaseController():
             "target": target or "legacy",
             "status": transfer_status,
             "doi": record.doi or "",
-            "published_url": record.published_url or "",
+            "published_url": BaseController._safe_published_url(record.published_url),
             "published_dataset_id": published_dataset_id,
             "publish_time": publish_time,
         }
+
+    @staticmethod
+    def _safe_published_url(value):
+        value = value or ""
+        parsed = urlparse(value)
+        return value if parsed.scheme in ("http", "https") and parsed.netloc else ""
 
     @staticmethod
     def get_transfer_status(dataset_id):

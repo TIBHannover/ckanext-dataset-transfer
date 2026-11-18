@@ -299,6 +299,70 @@ def test_publish_page_renders_for_editor(app):
     assert response.status_code == 200, _body(response)
     assert "Publish the dataset" in _body(response)
     assert 'id="publish_url"' in _body(response)
+    assert "Migration test dataset" in _body(response)
+    assert "Select a publish target" in _body(response)
+    assert "LUH data repository" in _body(response)
+    assert "RADAR4Ing" in _body(response)
+    assert 'id="publish_target_details" hidden' in _body(response)
+
+
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_publish_page_masks_stored_luh_token(app):
+    import ckan.tests.factories as factories
+    import ckan.plugins.toolkit as toolkit
+    from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
+
+    user = factories.SysadminWithToken()
+    dataset = factories.Dataset()
+    token = "never-render-this-complete-token-3f2a"
+    PublishApiToken(
+        api_token=token,
+        user_id=user["id"],
+        target_ckan="https://data.uni-hannover.de/",
+    ).save()
+
+    response = app.get(
+        toolkit.url_for("dataset_transfer.publish_page", dataset_name=dataset["name"]),
+        headers=_auth_headers(user),
+    )
+    body = _body(response)
+
+    assert response.status_code == 200
+    assert 'id="api_token_saved" value="saved" checked' in body
+    assert "Stored token" in body
+    assert "3f2a" in body
+    assert token not in body
+
+
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_publish_page_shows_recorded_radar_transfer_without_blocking_luh(app):
+    from datetime import datetime
+    import ckan.tests.factories as factories
+    import ckan.plugins.toolkit as toolkit
+    from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
+
+    user = factories.SysadminWithToken()
+    dataset = factories.Dataset()
+    published_url = "https://radar.example.test/datasets/radar-id"
+    PublishedDataset(
+        dataset_id=dataset["id"],
+        doi="10.123/radar",
+        published_url=published_url,
+        publish_time=datetime.utcnow(),
+        published_dataset_id=PublishedDataset.encode_target_id("radar", "radar-id"),
+    ).save()
+
+    response = app.get(
+        toolkit.url_for("dataset_transfer.publish_page", dataset_name=dataset["name"]),
+        headers=_auth_headers(user),
+    )
+    body = _body(response)
+
+    assert response.status_code == 200
+    assert 'data-radar-transferred="true"' in body
+    assert "This dataset is already in RADAR4Ing." in body
+    assert published_url in body
+    assert '<option value="luh">LUH data repository</option>' in body
 
 
 @pytest.mark.ckan_config("SECRET_KEY", "dataset-transfer-test-secret")
@@ -432,6 +496,116 @@ def test_publish_rejects_missing_consent_with_json_error(app):
         "error": "Missing consent",
         "message": "Terms of usage and rights of use must be accepted.",
     }
+
+
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_luh_publish_rejects_missing_new_token_after_consent(app, monkeypatch):
+    import ckan.plugins.toolkit as toolkit
+    import ckan.tests.factories as factories
+
+    user = factories.SysadminWithToken()
+    dataset = factories.Dataset()
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_organization",
+        "configured-destination",
+    )
+    response = app.post(
+        "/dataset_transfer/publish",
+        params={
+            "package_id": dataset["id"],
+            "publish_target": "luh",
+            "api_token": "",
+            "save_api_token_box": "false",
+            "token_exist_box": "false",
+            "terms_of_usage": "true",
+            "rights_of_use": "true",
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 400
+    assert response.json["error"] == "Invalid request"
+    assert response.json["message"] == "A destination API token is required."
+
+
+@pytest.mark.parametrize(
+    "submitted_token,use_saved,save_new,expected_remote_token,expected_saved_token",
+    [
+        ("ignored-token", True, False, "stored-token", "stored-token"),
+        ("temporary-token", False, False, "temporary-token", "stored-token"),
+        ("replacement-token", False, True, "replacement-token", "replacement-token"),
+    ],
+    ids=("saved-token", "temporary-token", "replace-saved-token"),
+)
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_luh_token_choice_controls_remote_and_persisted_token(
+    app,
+    monkeypatch,
+    submitted_token,
+    use_saved,
+    save_new,
+    expected_remote_token,
+    expected_saved_token,
+):
+    import ckan.plugins.toolkit as toolkit
+    import ckan.tests.factories as factories
+    from ckanext.dataset_transfer.controllers import base
+    from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
+
+    user = factories.SysadminWithToken()
+    dataset = factories.Dataset(resources=[])
+    PublishApiToken(
+        api_token="stored-token",
+        user_id=user["id"],
+        target_ckan="https://data.uni-hannover.de/",
+    ).save()
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_organization",
+        "configured-destination",
+    )
+    monkeypatch.setattr(
+        base.Helper, "check_access_edit_package", lambda package_id: True
+    )
+    remote_tokens = []
+
+    def fake_remote_json(method, action, **kwargs):
+        remote_tokens.append(kwargs["headers"]["Authorization"])
+        if action == "organization_show":
+            return {"success": True, "result": {"id": "target-org-id"}}
+        if action == "package_show":
+            raise base.RemoteAPIError(action, "not found", status=404)
+        if action == "package_create":
+            return {
+                "success": True,
+                "result": {
+                    "id": "target-dataset-id",
+                    "name": "target-dataset",
+                    "doi": "10.123/test",
+                },
+            }
+        pytest.fail("Unexpected remote action: {}".format(action))
+
+    monkeypatch.setattr(base.BaseController, "_remote_json", fake_remote_json)
+    response = app.post(
+        "/dataset_transfer/publish",
+        params={
+            "package_id": dataset["id"],
+            "publish_target": "luh",
+            "api_token": submitted_token,
+            "save_api_token_box": str(save_new).lower(),
+            "token_exist_box": str(use_saved).lower(),
+            "terms_of_usage": "true",
+            "rights_of_use": "true",
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 200, response.json
+    assert remote_tokens
+    assert set(remote_tokens) == {expected_remote_token}
+    assert PublishApiToken.get_by_user(user["id"]).api_token == expected_saved_token
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
@@ -998,9 +1172,10 @@ def test_resource_failure_keeps_incomplete_transfer_and_never_reports_success(
     assert retry.json["error"] == "Incomplete transfer requires reconciliation"
 
 
+@pytest.mark.parametrize("publish_target", ["luh", "radar"])
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_repeated_publish_after_success_is_rejected_before_remote_calls(
-    app, monkeypatch
+def test_repeated_publish_after_success_is_rejected_per_target_before_remote_calls(
+    app, monkeypatch, publish_target
 ):
     import ckan.tests.factories as factories
     from ckanext.dataset_transfer.controllers import base
@@ -1015,7 +1190,7 @@ def test_repeated_publish_after_success_is_rejected_before_remote_calls(
         doi="10.123/existing",
         published_url="https://destination.example/dataset/existing",
         published_dataset_id=PublishedDataset.encode_target_id(
-            "luh", "existing-remote-id"
+            publish_target, "existing-remote-id"
         ),
         publish_time=datetime.utcnow(),
     ).save()
@@ -1031,6 +1206,7 @@ def test_repeated_publish_after_success_is_rejected_before_remote_calls(
         "/dataset_transfer/publish",
         params={
             "package_id": dataset["id"],
+            "publish_target": publish_target,
             "terms_of_usage": "true",
             "rights_of_use": "true",
         },
@@ -1127,6 +1303,120 @@ def test_remote_dataset_is_reconciled_when_initial_local_save_failed(
     assert retry.status_code == 409
     assert retry.json["error"] == "Destination dataset requires reconciliation"
     assert package_create_calls == [1]
+
+
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_publish_dataset_to_radar_uses_server_credentials(app, monkeypatch, tmp_path):
+    import ckan.plugins.toolkit as toolkit
+    import ckan.tests.factories as factories
+    from ckanext.dataset_transfer.controllers import base
+    from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
+
+    user = factories.SysadminWithToken()
+    storage_path = tmp_path / "ckan-storage"
+    upload_id = "fedcba1234567890fedcba1234567890"
+    upload_dir = storage_path / "resources" / upload_id[:3] / upload_id[3:6]
+    upload_dir.mkdir(parents=True)
+    (upload_dir / upload_id[6:]).write_bytes(b"radar resource data")
+    dataset = {
+        "id": "local-radar-dataset-id",
+        "name": "local-radar-dataset",
+        "title": "Local RADAR Dataset",
+        "notes": "Dataset to test RADAR publishing",
+        "author": "Radar Author",
+        "maintainer": "Radar Maintainer",
+        "license_id": "cc-by-4.0",
+        "metadata_created": "2026-01-15T12:00:00",
+        "organization": {"title": "Leibniz University Hannover"},
+        "tags": [{"name": "radar"}],
+        "resources": [{
+            "id": upload_id,
+            "name": "radar-upload.txt",
+            "url": "radar-upload.txt",
+            "url_type": "upload",
+        }],
+    }
+    calls = []
+    original_get = requests.get
+
+    for key, value in (
+        ("ckan.storage_path", str(storage_path)),
+        ("ckan.site_url", "https://ckan.example.test"),
+        ("ckanext.dataset_transfer.radar.context_url", "https://test.radar-service.eu/radar"),
+        ("ckanext.dataset_transfer.radar.workspace_id", "workspace-id"),
+        ("ckanext.dataset_transfer.radar.responsible_email", "data@example.test"),
+        ("ckanext.dataset_transfer.radar.access_token", "radar-access-token"),
+        ("ckanext.dataset_transfer.radar.publisher", "Leibniz University Hannover"),
+        ("ckanext.crc.project.id", "TRR375"),
+        ("ckanext.dataset_transfer.radar.dfg_award_number", "511148852"),
+    ):
+        monkeypatch.setitem(toolkit.config, key, value)
+    monkeypatch.setattr(base.Helper, "check_access_edit_package", lambda package_id: True)
+    monkeypatch.setattr(
+        base.toolkit,
+        "get_action",
+        lambda name: (
+            lambda context, data_dict: dataset
+            if name == "package_show"
+            else pytest.fail("Unexpected CKAN action: {}".format(name))
+        ),
+    )
+
+    def fake_post(url, headers=None, json=None, files=None, **kwargs):
+        calls.append(("POST", url))
+        if url.endswith("/api/workspaces/workspace-id/datasets"):
+            assert headers["Authorization"] == "Bearer radar-access-token"
+            return FakeResponse(200, {"id": "radar-dataset-id"})
+        if url.endswith("/api/datasets/radar-dataset-id/metadata"):
+            assert b"Local RADAR Dataset" in files["metadataFile"][1]
+            return FakeResponse(200, {"success": True})
+        if url.endswith("/api/datasets/radar-dataset-id/doi"):
+            return FakeResponse(200, {"doi": "10.123/radar"})
+        if url.endswith("/radar-ingest/upload/radar-dataset-id/ingest"):
+            assert files["file"][1].getvalue()
+            return FakeResponse(200, {"success": True})
+        pytest.fail("Unexpected RADAR post: {}".format(url))
+
+    def fake_get(url, headers=None, **kwargs):
+        if urlparse(url).hostname in {"solr", "localhost", "127.0.0.1", "ckan"}:
+            return original_get(url, headers=headers, **kwargs)
+        calls.append(("GET", url))
+        if url.endswith("/api/datasets/radar-dataset-id/metadata/validate"):
+            return FakeResponse(200, {"valid": True})
+        if url.endswith("/api/datasets/radar-dataset-id/children"):
+            return FakeResponse(200, {
+                "data": [{"fileName": "radar-upload.txt"}], "totalHits": 1
+            })
+        pytest.fail("Unexpected RADAR get: {}".format(url))
+
+    monkeypatch.setattr(base.requests, "post", fake_post)
+    monkeypatch.setattr(base.requests, "get", fake_get)
+    reviewed_metadata = base.map_ckan_to_radar(
+        dataset,
+        "Leibniz University Hannover",
+        project_id="TRR375",
+        dfg_award_number="511148852",
+    )
+
+    response = app.post(
+        "/dataset_transfer/publish",
+        params={
+            "package_id": dataset["id"],
+            "publish_target": "radar",
+            "radar_metadata": json.dumps(reviewed_metadata),
+            "terms_of_usage": "true",
+            "rights_of_use": "true",
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 200, response.json
+    assert response.json["published_dataset_id"] == "radar-dataset-id"
+    assert not any("data.uni-hannover.de" in url for _, url in calls)
+    publication = PublishedDataset.get_by_dataset(dataset["id"])
+    assert PublishedDataset.decode_target_id(publication.published_dataset_id) == (
+        "radar", "radar-dataset-id"
+    )
 
 
 @pytest.mark.usefixtures("clean_db")
