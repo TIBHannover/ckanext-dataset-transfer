@@ -991,6 +991,158 @@ def test_remote_api_http_errors_are_sanitized(monkeypatch, status_code):
     assert expected[status_code] in str(raised.value)
 
 
+def test_destination_conflict_exposes_only_sanitized_validation_errors(monkeypatch):
+    from ckanext.dataset_transfer.controllers import base
+
+    monkeypatch.setattr(
+        base.requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(
+            409,
+            {
+                "success": False,
+                "error": {
+                    "__type": "Validation Error",
+                    "name": ["That URL is already in use."],
+                    "title": ["Missing value"],
+                    "api_token": ["destination-secret-token"],
+                    "message": "The destination rejected the dataset.",
+                },
+            },
+        ),
+    )
+
+    with pytest.raises(base.RemoteAPIError) as raised:
+        base.BaseController._remote_json(
+            "post",
+            "package_create",
+            headers={"Authorization": "source-secret-token"},
+            json={"name": "conflicting-name"},
+        )
+
+    error = raised.value
+    assert error.status == 409
+    assert error.validation_errors == {
+        "name": ["That URL is already in use."],
+        "title": ["Missing value"],
+    }
+    assert "dataset name may already exist" in str(error)
+    assert "name: That URL is already in use." in str(error)
+    assert "source-secret-token" not in str(error)
+    assert "destination-secret-token" not in str(error)
+
+
+def test_luh_payload_drops_invalid_source_id_and_destination_managed_fields():
+    from ckanext.dataset_transfer.controllers import base
+
+    source = {
+        "id": "not a valid destination dataset id",
+        "name": "research-dataset",
+        "title": "Research Dataset",
+        "notes": "Metadata that must be preserved",
+        "tags": [{"name": "research"}],
+        "extras": [{"key": "discipline", "value": "engineering"}],
+        "metadata_created": "2026-11-18T10:00:00",
+        "metadata_modified": "2026-11-18T11:00:00",
+        "creator_user_id": "source-user-id",
+        "revision_id": "source-revision-id",
+        "organization": {"id": "source-organization"},
+        "state": "active",
+        "resources": [{"id": "source-resource-id"}],
+        "groups": [{"id": "source-group-id"}],
+    }
+    original = json.loads(json.dumps(source))
+
+    prepared = base.BaseController._prepare_luh_dataset(
+        source, "destination-organization"
+    )
+
+    assert "id" not in prepared
+    for field in base.BaseController.destination_managed_package_fields:
+        assert field not in prepared
+    assert prepared["name"] == source["name"]
+    assert prepared["title"] == source["title"]
+    assert prepared["notes"] == source["notes"]
+    assert prepared["tags"] == source["tags"]
+    assert prepared["extras"] == source["extras"]
+    assert prepared["owner_org"] == "destination-organization"
+    assert prepared["resources"] == []
+    assert prepared["groups"] == []
+    assert source == original
+
+
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_luh_package_create_conflict_returns_destination_validation_details(
+    app, monkeypatch
+):
+    import ckan.plugins.toolkit as toolkit
+    import ckan.tests.factories as factories
+    from ckanext.dataset_transfer.controllers import base
+
+    user = factories.SysadminWithToken()
+    dataset = factories.Dataset(resources=[])
+    original_get = requests.get
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.target_organization",
+        "destination-organization",
+    )
+    monkeypatch.setattr(base.Helper, "check_access_edit_package", lambda _: True)
+
+    def fake_get(url, headers=None, params=None, **kwargs):
+        if urlparse(url).hostname in {"solr", "localhost", "127.0.0.1", "ckan"}:
+            return original_get(url, headers=headers, params=params, **kwargs)
+        if url.endswith("/package_show"):
+            return FakeResponse(
+                404, {"success": False, "error": {"message": "Not found"}}
+            )
+        return FakeResponse(
+            200, {"success": True, "result": {"id": "destination-org-id"}}
+        )
+
+    def fake_post(url, **kwargs):
+        assert url.endswith("/package_create")
+        assert "id" not in kwargs["json"]
+        return FakeResponse(
+            409,
+            {
+                "success": False,
+                "error": {
+                    "name": ["That URL is already in use."],
+                    "notes": ["Destination validation rejected this field."],
+                    "authorization": ["Bearer destination-secret"],
+                },
+            },
+        )
+
+    monkeypatch.setattr(base.requests, "get", fake_get)
+    monkeypatch.setattr(base.requests, "post", fake_post)
+    response = app.post(
+        "/dataset_transfer/publish",
+        params={
+            "package_id": dataset["id"],
+            "publish_target": "luh",
+            "api_token": "source-secret-token",
+            "token_exist_box": "false",
+            "save_api_token_box": "false",
+            "terms_of_usage": "true",
+            "rights_of_use": "true",
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 409
+    assert response.json["error"] == "Remote package_create failed"
+    assert response.json["destination_status"] == 409
+    assert response.json["validation_errors"] == {
+        "name": ["That URL is already in use."],
+        "notes": ["Destination validation rejected this field."],
+    }
+    serialized = json.dumps(response.json)
+    assert "source-secret-token" not in serialized
+    assert "destination-secret" not in serialized
+
+
 @pytest.mark.parametrize(
     "failure,response,message",
     [

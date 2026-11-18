@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import os
+import re
 from urllib.parse import urlparse
 
 import requests
@@ -35,15 +36,39 @@ log = logging.getLogger(__name__)
 
 
 class RemoteAPIError(Exception):
-    def __init__(self, operation, message, status=None):
+    def __init__(self, operation, message, status=None, validation_errors=None):
         super(RemoteAPIError, self).__init__(message)
         self.operation = operation
         self.status = status
+        self.validation_errors = validation_errors or {}
 
 
 class BaseController():
 
     remote_timeout = 60
+    destination_managed_package_fields = (
+        "creator_user_id",
+        "display_name",
+        "metadata_created",
+        "metadata_modified",
+        "num_resources",
+        "num_tags",
+        "organization",
+        "relationships_as_object",
+        "relationships_as_subject",
+        "revision_id",
+        "state",
+        "tracking_summary",
+    )
+    sensitive_error_key = re.compile(
+        r"authorization|cookie|credential|csrf|password|secret|token|api.?key",
+        re.IGNORECASE,
+    )
+    sensitive_error_text = re.compile(
+        r"authorization|cookie|credential|csrf|password|secret|api.?token|"
+        r"api.?key|bearer\s+\S+",
+        re.IGNORECASE,
+    )
 
     @staticmethod
     def _json_response(data, status=200):
@@ -69,10 +94,54 @@ class BaseController():
             return fallback
         error = payload.get("error")
         if isinstance(error, dict):
-            return error.get("message") or error.get("__type") or fallback
+            message = error.get("message") or error.get("__type")
+            return BaseController._safe_error_text(message) or fallback
         if isinstance(error, str):
-            return error
+            return BaseController._safe_error_text(error) or fallback
         return fallback
+
+    @staticmethod
+    def _safe_error_text(value):
+        if not isinstance(value, str):
+            return ""
+        value = " ".join(value.split())
+        if not value or BaseController.sensitive_error_text.search(value):
+            return ""
+        return value[:500]
+
+    @staticmethod
+    def _safe_validation_errors(payload):
+        """Extract CKAN validation messages without reflecting credentials."""
+        if not isinstance(payload, dict) or not isinstance(payload.get("error"), dict):
+            return {}
+        safe_errors = {}
+        for field, value in payload["error"].items():
+            if (
+                not isinstance(field, str)
+                or field.startswith("__")
+                or field == "message"
+                or BaseController.sensitive_error_key.search(field)
+            ):
+                continue
+            safe_field = re.sub(r"[^A-Za-z0-9_. -]", "", field)[:80]
+            if not safe_field:
+                continue
+            values = value if isinstance(value, (list, tuple)) else [value]
+            messages = []
+            for item in values[:5]:
+                message = BaseController._safe_error_text(item)
+                if message:
+                    messages.append(message)
+            if messages:
+                safe_errors[safe_field] = messages
+        return safe_errors
+
+    @staticmethod
+    def _validation_error_summary(validation_errors):
+        details = []
+        for field, messages in list(validation_errors.items())[:5]:
+            details.append("{}: {}".format(field, "; ".join(messages)))
+        return " ".join(details)
 
     @staticmethod
     def _remote_json(method, action, **kwargs):
@@ -107,21 +176,40 @@ class BaseController():
                 401: "Destination API authentication failed.",
                 403: "Destination API authorization failed.",
                 404: "Destination API endpoint or object was not found.",
+                409: (
+                    "Destination CKAN rejected the request because of a conflict. "
+                    "The dataset name may already exist or a field may be invalid."
+                ),
                 500: "Destination API reported an internal server error.",
             }
+            validation_errors = BaseController._safe_validation_errors(payload)
+            message = status_messages.get(
+                response.status_code,
+                "Destination API returned HTTP {}.".format(response.status_code),
+            )
+            if response.status_code in (400, 409, 422):
+                summary = BaseController._validation_error_summary(validation_errors)
+                if summary:
+                    message = "{} {}".format(message, summary)
             raise RemoteAPIError(
                 action,
-                status_messages.get(
-                    response.status_code,
-                    "Destination API returned HTTP {}.".format(response.status_code),
-                ),
+                message,
                 response.status_code,
+                validation_errors,
             )
         if payload.get("success") is False:
+            validation_errors = BaseController._safe_validation_errors(payload)
+            message = BaseController._remote_error_message(
+                payload, "Destination API reported a failure."
+            )
+            summary = BaseController._validation_error_summary(validation_errors)
+            if summary:
+                message = "{} {}".format(message, summary)
             raise RemoteAPIError(
                 action,
-                "Destination API reported a failure.",
+                message,
                 response.status_code,
+                validation_errors,
             )
         return payload
 
@@ -130,12 +218,31 @@ class BaseController():
         message = str(error)
         if error.status:
             message = "{} (HTTP {})".format(message, error.status)
+            details["destination_status"] = error.status
+        if error.validation_errors:
+            details["validation_errors"] = error.validation_errors
         return BaseController._error_response(
             "Remote {} failed".format(error.operation),
             message,
-            502,
+            409 if error.status == 409 else 502,
             **details
         )
+
+    @staticmethod
+    def _prepare_luh_dataset(dataset, destination_organization_id):
+        """Copy source metadata while dropping source-CKAN managed fields."""
+        dataset_to_publish = copy.deepcopy(dataset)
+        dataset_to_publish.pop("id", None)
+        for field in BaseController.destination_managed_package_fields:
+            dataset_to_publish.pop(field, None)
+        dataset_to_publish["resources"] = []
+        dataset_to_publish["groups"] = []
+        dataset_to_publish["isopen"] = True
+        dataset_to_publish["private"] = False
+        dataset_to_publish["owner_org"] = destination_organization_id
+        dataset_to_publish["terms_of_usage"] = "Yes"
+        dataset_to_publish["have_copyright"] = "Yes"
+        return dataset_to_publish
 
 
     def publish_page(dataset_name):
@@ -363,15 +470,9 @@ class BaseController():
                 )
             resources = copy.deepcopy(dataset.get('resources', []))
             dataset_local_id = dataset['id']
-            dataset_to_publish = copy.deepcopy(dataset)
-            dataset_to_publish['resources'] = []
-            dataset_to_publish["groups"] = []
-            dataset_to_publish["isopen"] = True
-            dataset_to_publish["private"] = False
-            dataset_to_publish["owner_org"] = org_answer['result']['id']
-            dataset_to_publish.pop("id", None)
-            dataset_to_publish['terms_of_usage'] = "Yes"
-            dataset_to_publish['have_copyright'] = "Yes"
+            dataset_to_publish = BaseController._prepare_luh_dataset(
+                dataset, org_answer['result']['id']
+            )
             headers["Content-Type"] = "application/json"
             try:
                 existing_remote = BaseController._remote_json(
