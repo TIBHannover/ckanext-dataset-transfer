@@ -2,6 +2,11 @@ let radarSectionOrder = ['dataset', 'creators', 'classification', 'rights', 'fun
 let radarActiveSection = 0;
 let radarReviewedSections = {};
 let radarDynamicRowId = 0;
+let radarIdentifierVerificationSequence = 0;
+let radarIdentifierVerificationCache = {orcid: {}, ror: {}};
+let radarIdentifierVerificationRequests = {orcid: {}, ror: {}};
+const radarIdentifierDebounceDelay = 500;
+const radarIdentifierRequestTimeout = 6000;
 
 $(document).ready(function(){
     
@@ -269,10 +274,14 @@ $(document).ready(function(){
         mark_active_radar_section_unreviewed();
      });
      $(document).on('change', '.radar-publisher-scheme', function(){
-        update_publisher_scheme($(this).closest('.radar-publisher-row'));
+        let row = $(this).closest('.radar-publisher-row');
+        update_publisher_scheme(row);
+        validate_organization_identifier(row, 'publisher', true);
      });
      $(document).on('change', '.radar-rights-holder-scheme', function(){
-        update_rights_holder_scheme($(this).closest('.radar-rights-holder-row'));
+        let row = $(this).closest('.radar-rights-holder-row');
+        update_rights_holder_scheme(row);
+        validate_organization_identifier(row, 'rights-holder', true);
      });
      $('.radar-publisher-row').each(function(){ update_publisher_scheme($(this)); });
      $('.radar-rights-holder-row').each(function(){ update_rights_holder_scheme($(this)); });
@@ -319,6 +328,12 @@ $(document).ready(function(){
      $(document).on('input change', '.radar-publisher-name, .radar-publisher-scheme', sync_rights_holder_from_publisher);
      $(document).on('input', '.radar-rights-holder-identifier', function(){
         detect_identifier_scheme($(this).closest('.radar-rights-holder-row'), 'rights-holder');
+     });
+     $(document).on('input', '.radar-orcid, .radar-affiliation-ror, .radar-publisher-identifier, .radar-rights-holder-identifier', function(){
+        schedule_identifier_validation($(this));
+     });
+     $(document).on('blur', '.radar-orcid, .radar-affiliation-ror, .radar-publisher-identifier, .radar-rights-holder-identifier', function(){
+        validate_identifier_after_blur($(this));
      });
      $('#radar_rights_same_as_publisher').change(toggle_rights_holder_same_as_publisher);
 
@@ -379,6 +394,7 @@ function initialize_radar_review(){
     review.find('.radar-rights-holder-row').each(function(){
         detect_identifier_scheme($(this), 'rights-holder');
     });
+    initialize_identifier_validation(review);
     show_radar_section(0, false);
 }
 
@@ -477,10 +493,10 @@ function detect_identifier_scheme(row, kind){
     let scheme = row.find(
         kind === 'publisher' ? '.radar-publisher-scheme' : '.radar-rights-holder-scheme'
     );
-    if(/^(https:\/\/ror\.org\/)?0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$/i.test(identifier)){
+    if(normalize_ror(identifier).formatValid){
         scheme.val('ROR');
     }
-    else if(/^(https?:\/\/orcid\.org\/)?\d{4}-\d{4}-\d{4}-[\dX]{4}$/i.test(identifier)){
+    else if(normalize_orcid(identifier).formatValid){
         scheme.val('ORCID');
     }
     else if(!identifier){
@@ -532,6 +548,238 @@ function sync_rights_holder_from_publisher(){
     holder.find('.radar-rights-holder-identifier').val(publisher.find('.radar-publisher-identifier').val());
     holder.find('.radar-rights-holder-scheme').val(publisher.find('.radar-publisher-scheme').val());
     holder.find('.radar-rights-holder-scheme-uri').val(publisher.find('.radar-publisher-scheme-uri').val());
+    validate_organization_identifier(holder, 'rights-holder', true);
+}
+
+function initialize_identifier_validation(scope){
+    scope.find('.radar-orcid, .radar-affiliation-ror').each(function(){
+        if(clean_value($(this).val())){ validate_identifier_input($(this), true); }
+    });
+    scope.find('.radar-publisher-row').each(function(){
+        validate_organization_identifier($(this), 'publisher', true);
+    });
+    scope.find('.radar-rights-holder-row').each(function(){
+        validate_organization_identifier($(this), 'rights-holder', true);
+    });
+}
+
+function schedule_identifier_validation(input){
+    clearTimeout(input.data('radar-identifier-timer'));
+    invalidate_identifier_verification(input);
+    if(!clean_value(input.val())){ return; }
+    input.data('radar-identifier-timer', setTimeout(function(){
+        validate_identifier_input(input, true);
+    }, radarIdentifierDebounceDelay));
+}
+
+function validate_identifier_after_blur(input){
+    clearTimeout(input.data('radar-identifier-timer'));
+    validate_identifier_input(input, true);
+}
+
+function validate_organization_identifier(row, kind, verifyOnline){
+    let input = row.find(kind === 'publisher' ? '.radar-publisher-identifier' : '.radar-rights-holder-identifier');
+    let scheme = row.find(kind === 'publisher' ? '.radar-publisher-scheme' : '.radar-rights-holder-scheme').val();
+    if(scheme === 'ROR'){
+        validate_identifier_input(input, verifyOnline);
+    }
+    else{
+        invalidate_identifier_verification(input);
+    }
+}
+
+function identifier_kind(input){
+    if(input.hasClass('radar-orcid')){ return 'orcid'; }
+    if(input.hasClass('radar-affiliation-ror')){ return 'ror'; }
+    if(input.hasClass('radar-publisher-identifier')){
+        return input.closest('.radar-publisher-row').find('.radar-publisher-scheme').val() === 'ROR' ? 'ror' : '';
+    }
+    if(input.hasClass('radar-rights-holder-identifier')){
+        return input.closest('.radar-rights-holder-row').find('.radar-rights-holder-scheme').val() === 'ROR' ? 'ror' : '';
+    }
+    return '';
+}
+
+function invalidate_identifier_verification(input){
+    radarIdentifierVerificationSequence += 1;
+    input.data('radar-identifier-sequence', radarIdentifierVerificationSequence);
+    render_identifier_feedback(input, '', '');
+}
+
+function validate_identifier_input(input, verifyOnline){
+    let kind = identifier_kind(input);
+    let value = clean_value(input.val());
+    invalidate_identifier_verification(input);
+    let sequence = input.data('radar-identifier-sequence');
+    if(!kind || !value){ return; }
+
+    let local = kind === 'orcid' ? normalize_orcid(value) : normalize_ror(value);
+    if(!local.formatValid){
+        render_identifier_feedback(input, 'invalid', kind === 'orcid' ?
+            'Please enter a valid ORCID identifier.' : 'Please enter a valid ROR identifier.');
+        return;
+    }
+    if(!local.checksumValid){
+        render_identifier_feedback(input, 'invalid', kind === 'orcid' ?
+            'This ORCID identifier has an invalid checksum.' : 'This ROR identifier has invalid check characters.');
+        return;
+    }
+
+    input.val(local.canonical);
+    if(input.hasClass('radar-publisher-identifier')){ sync_rights_holder_from_publisher(); }
+    if(!verifyOnline){
+        render_identifier_feedback(input, 'valid', identifier_valid_but_unverified_message(kind));
+        return;
+    }
+
+    let cached = radarIdentifierVerificationCache[kind][local.id];
+    if(cached){
+        render_registry_result(input, kind, cached);
+        return;
+    }
+
+    render_identifier_feedback(input, 'checking', kind === 'orcid' ?
+        'Checking the ORCID registry…' : 'Checking the ROR registry…');
+    verify_identifier_with_cache(kind, local.id).then(function(result){
+        let currentKind = identifier_kind(input);
+        let current = currentKind === 'orcid' ? normalize_orcid(input.val()) : normalize_ror(input.val());
+        if(!identifier_verification_is_current(
+            sequence, kind, local.id,
+            input.data('radar-identifier-sequence'), currentKind, current.id
+        )){
+            return;
+        }
+        render_registry_result(input, kind, result);
+    });
+}
+
+function identifier_verification_is_current(expectedSequence, expectedKind, expectedId, currentSequence, currentKind, currentId){
+    return expectedSequence === currentSequence && expectedKind === currentKind && expectedId === currentId;
+}
+
+function normalize_orcid(value){
+    let raw = clean_value(value);
+    let id = raw.replace(/^https?:\/\/orcid\.org\//i, '').toUpperCase();
+    let formatValid = /^\d{4}-\d{4}-\d{4}-[\dX]{4}$/.test(id);
+    if(!formatValid){ return {formatValid: false, checksumValid: false, id: id, canonical: raw}; }
+    let compact = id.replace(/-/g, '');
+    let total = 0;
+    for(let index = 0; index < 15; index += 1){
+        total = (total + parseInt(compact.charAt(index), 10)) * 2;
+    }
+    let remainder = (12 - (total % 11)) % 11;
+    let expected = remainder === 10 ? 'X' : String(remainder);
+    return {
+        formatValid: true,
+        checksumValid: compact.charAt(15) === expected,
+        id: id,
+        canonical: 'https://orcid.org/' + id
+    };
+}
+
+function normalize_ror(value){
+    let raw = clean_value(value);
+    let id = raw.replace(/^https:\/\/ror\.org\//i, '').replace(/^ror\.org\//i, '').toLowerCase();
+    let formatValid = /^0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$/.test(id);
+    if(!formatValid){ return {formatValid: false, checksumValid: false, id: id, canonical: raw}; }
+    let alphabet = '0123456789abcdefghjkmnpqrstvwxyz';
+    let numericValue = 0;
+    for(let index = 1; index < 7; index += 1){
+        numericValue = (numericValue * 32) + alphabet.indexOf(id.charAt(index));
+    }
+    let expected = String(98 - ((numericValue * 100) % 97));
+    if(expected.length < 2){ expected = '0' + expected; }
+    return {
+        formatValid: true,
+        checksumValid: id.slice(-2) === expected,
+        id: id,
+        canonical: 'https://ror.org/' + id
+    };
+}
+
+function verify_identifier_in_registry(kind, id){
+    let url = kind === 'orcid' ?
+        'https://pub.orcid.org/v3.0/' + encodeURIComponent(id) + '/record' :
+        'https://api.ror.org/v2/organizations/' + encodeURIComponent(id);
+    return $.ajax({
+        url: url,
+        method: 'GET',
+        dataType: 'json',
+        timeout: radarIdentifierRequestTimeout,
+        beforeSend: function(request){
+            if(kind === 'orcid'){
+                request.setRequestHeader('Accept', 'application/vnd.orcid+json');
+            }
+        }
+    }).then(function(data){
+        let name = '';
+        if(kind === 'ror'){
+            $.each(data.names || [], function(_, item){
+                if((item.types || []).indexOf('ror_display') !== -1){ name = item.value || ''; return false; }
+            });
+        }
+        return {status: 'verified', name: name};
+    }, function(request, textStatus){
+        if(request.status === 404){ return {status: 'not_found'}; }
+        if(request.status === 429 || request.status === 503){ return {status: 'rate_limited'}; }
+        return {status: textStatus === 'timeout' ? 'timeout' : 'unavailable'};
+    });
+}
+
+function verify_identifier_with_cache(kind, id){
+    if(radarIdentifierVerificationRequests[kind][id]){
+        return radarIdentifierVerificationRequests[kind][id];
+    }
+    let request = verify_identifier_in_registry(kind, id).then(function(result){
+        delete radarIdentifierVerificationRequests[kind][id];
+        if(result.status === 'verified' || result.status === 'not_found'){
+            radarIdentifierVerificationCache[kind][id] = result;
+        }
+        return result;
+    });
+    radarIdentifierVerificationRequests[kind][id] = request;
+    return request;
+}
+
+function render_registry_result(input, kind, result){
+    if(result.status === 'verified'){
+        let message = kind === 'orcid' ? '✓ ORCID verified' : '✓ ROR verified';
+        if(kind === 'ror' && result.name){ message += ' — ' + result.name; }
+        render_identifier_feedback(input, 'verified', message);
+    }
+    else if(result.status === 'not_found'){
+        render_identifier_feedback(input, 'warning', kind === 'orcid' ?
+            'This ORCID identifier could not be found in the ORCID registry.' :
+            'This ROR identifier could not be found in the ROR registry.');
+    }
+    else if(result.status === 'rate_limited'){
+        render_identifier_feedback(input, 'warning', (kind === 'orcid' ? 'ORCID' : 'ROR') +
+            ' format is valid. Online verification is temporarily rate limited.');
+    }
+    else{
+        render_identifier_feedback(input, 'warning', identifier_valid_but_unverified_message(kind));
+    }
+}
+
+function identifier_valid_but_unverified_message(kind){
+    return (kind === 'orcid' ? 'ORCID' : 'ROR') +
+        ' format is valid. Online verification is currently unavailable.';
+}
+
+function render_identifier_feedback(input, state, message){
+    let group = input.closest('.form-group');
+    let feedback = group.find('.radar-identifier-feedback').first();
+    if(!feedback.length){
+        feedback = $('<span class="help-block radar-identifier-feedback" aria-live="polite"></span>');
+        input.after(feedback);
+    }
+    group.removeClass('radar-identifier-invalid radar-identifier-verified radar-identifier-warning radar-identifier-checking');
+    input.removeAttr('aria-busy aria-invalid');
+    if(!state || !message){ feedback.empty().hide(); return; }
+    group.addClass('radar-identifier-' + state);
+    if(state === 'invalid'){ input.attr('aria-invalid', 'true'); }
+    if(state === 'checking'){ input.attr('aria-busy', 'true'); }
+    feedback.text(message).show();
 }
 
 function clean_value(value){
@@ -638,11 +886,13 @@ function validate_radar_metadata_in_browser(metadata){
 }
 
 function valid_orcid_format(value){
-    return /^(https?:\/\/orcid\.org\/)?\d{4}-\d{4}-\d{4}-[\dX]{4}$/i.test(clean_value(value));
+    let result = normalize_orcid(value);
+    return result.formatValid && result.checksumValid;
 }
 
 function valid_ror_format(value){
-    return /^(https:\/\/ror\.org\/)?0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$/i.test(clean_value(value));
+    let result = normalize_ror(value);
+    return result.formatValid && result.checksumValid;
 }
 
 function render_radar_confirmation(metadata){

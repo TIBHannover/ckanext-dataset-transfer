@@ -306,6 +306,32 @@
   border-color: #a94442;
 }
 
+#publish_radar_metadata_step .radar-identifier-feedback {
+  margin-bottom: 0;
+  margin-top: 5px;
+}
+
+#publish_radar_metadata_step .radar-identifier-invalid .form-control {
+  border-color: #a94442;
+}
+
+#publish_radar_metadata_step .radar-identifier-invalid .radar-identifier-feedback {
+  color: #a94442;
+}
+
+#publish_radar_metadata_step .radar-identifier-verified .form-control {
+  border-color: #3c763d;
+}
+
+#publish_radar_metadata_step .radar-identifier-verified .radar-identifier-feedback {
+  color: #3c763d;
+}
+
+#publish_radar_metadata_step .radar-identifier-warning .radar-identifier-feedback,
+#publish_radar_metadata_step .radar-identifier-checking .radar-identifier-feedback {
+  color: #777;
+}
+
 #publish_radar_metadata_step .radar-funding-warning {
   margin: 10px 0 0;
   padding: 8px 12px;
