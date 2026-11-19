@@ -307,6 +307,99 @@ def test_publish_page_renders_for_editor(app):
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_radar_metadata_review_renders_named_sections_and_preserves_fields(
+    app, monkeypatch
+):
+    import ckan.plugins.toolkit as toolkit
+    import ckan.tests.factories as factories
+
+    user = factories.SysadminWithToken()
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.radar.publisher",
+        "Leibniz University Hannover",
+    )
+    monkeypatch.setitem(toolkit.config, "ckanext.crc.project.id", "TRR375")
+    monkeypatch.setitem(
+        toolkit.config,
+        "ckanext.dataset_transfer.radar.dfg_award_number",
+        "511148852",
+    )
+    organization = factories.Organization(title="Leibniz University Hannover")
+    dataset = factories.Dataset(
+        title="RADAR review dataset",
+        author="Ada Lovelace",
+        maintainer="Grace Hopper",
+        license_id="cc-by-4.0",
+        tags=[{"name": "engineering"}],
+        owner_org=organization["id"],
+    )
+
+    response = app.get(
+        toolkit.url_for("dataset_transfer.publish_page", dataset_name=dataset["name"]),
+        headers=_auth_headers(user),
+    )
+    body = _body(response)
+
+    assert response.status_code == 200, body
+    assert "Review RADAR4Ing Metadata" in body
+    assert "They will not modify the original dataset" in body
+    assert "Imported from CKAN; editable for RADAR only." not in body
+    assert re.findall(r'data-radar-section="([^"]+)"', body) == [
+        "dataset", "creators", "classification", "rights", "funding"
+    ]
+    assert 'data-radar-section="dataset" role="tabpanel">' in body
+    for section in ("creators", "classification", "rights", "funding"):
+        assert 'data-radar-section="{}" role="tabpanel" hidden'.format(section) in body
+    assert 'value="DataManager" selected>Data Manager</option>' in body
+    assert 'id="radar_rights_same_as_publisher"' in body
+    assert 'class="radar-publisher-scheme-uri"' in body
+    assert 'class="radar-rights-holder-scheme-uri"' in body
+    assert 'class="radar-keyword-scheme" value="Other"' in body
+    assert 'class="radar-value-uri"' in body
+    assert 'class="radar-ontology-id"' in body
+    assert "Primary CRC Funding" in body
+    assert "511148852" in body
+    assert body.index('value="eng"') < body.index('value="deu"')
+    assert body.index('value="deu"') < body.index("──────────")
+    visible_text = re.sub(r"<[^>]+>", " ", body)
+    assert not re.search(r"\bStep\s+\d+\b|\b[1-5]/5\b", visible_text)
+
+
+def test_radar_review_javascript_preserves_submission_contract_and_dynamic_rows():
+    source = (
+        Path(__file__).parents[1] / "public" / "transfer.js"
+    ).read_text(encoding="utf-8")
+    template = (
+        Path(__file__).parents[1]
+        / "templates"
+        / "snippets"
+        / "radar_metadata_review.html"
+    ).read_text(encoding="utf-8")
+    publish_page = (
+        Path(__file__).parents[1] / "templates" / "publish_page.html"
+    ).read_text(encoding="utf-8")
+
+    assert "let radarSectionOrder = ['dataset', 'creators', 'classification', 'rights', 'funding'];" in source
+    assert "function show_radar_section(" in source
+    assert "function collect_radar_metadata(" in source
+    assert "function collect_person(" in source
+    assert "function validate_radar_metadata_in_browser(" in source
+    assert "function render_radar_confirmation(" in source
+    assert "function add_radar_row(" in source
+    assert "formdata.set('radar_metadata', JSON.stringify(collect_radar_metadata()));" in source
+    assert "radar-keyword-scheme" in source
+    assert "radar-value-uri" in source
+    assert "radar-ontology-id" in source
+    assert "$('#radar_language').select2" in source
+    assert "Rights holder is the same as publisher" in template
+    assert "<label>{{ _('Scheme URI') }}</label>" not in template
+    assert publish_page.index("dataset_transfer_cancel_btn") < publish_page.index(
+        "dataset_transfer_back_btn"
+    ) < publish_page.index("dataset_transfer_next_btn")
+
+
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
 def test_publish_page_masks_stored_luh_token(app):
     import ckan.tests.factories as factories
     import ckan.plugins.toolkit as toolkit

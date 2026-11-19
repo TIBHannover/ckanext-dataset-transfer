@@ -32,11 +32,11 @@
   <div class="row" id="action_btn_part">
     <br><hr>
     <div class="col-sm-12 publish-action-bar">
-      <button id="dataset_transfer_back_btn" class="btn btn-default" type="button">{{ _('Back') }}</button>
       <div class="publish-primary-actions">
         <a href="{{ h.url_for('dataset.read', id=pkg_dict['name'], _external=True) }}" id="dataset_transfer_cancel_btn"
            style="display: inline-flex; align-items: center; justify-content: center;"
            class="btn btn-default">{{ _('Cancel') }}</a>
+        <button id="dataset_transfer_back_btn" class="btn btn-default" type="button">{{ _('Back') }}</button>
         <button type="submit" id="dataset_transfer_submit" class="btn btn-success org_should_exist"
                 style="display: inline-flex; align-items: center; justify-content: center;" step="2">{{ _('Publish') }}</button>
         <button id="dataset_transfer_next_btn" class="btn btn-primary org_should_exist"

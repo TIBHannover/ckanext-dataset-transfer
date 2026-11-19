@@ -1,3 +1,8 @@
+let radarSectionOrder = ['dataset', 'creators', 'classification', 'rights', 'funding'];
+let radarActiveSection = 0;
+let radarReviewedSections = {};
+let radarDynamicRowId = 0;
+
 $(document).ready(function(){
     
     update_publish_target_fields();
@@ -12,7 +17,9 @@ $(document).ready(function(){
                 $('#publish_destination_selection').hide();
                 $('#publish_step1').hide();
                 $('#publish_radar_metadata_step').show();
-                $(this).attr("step", "radar-metadata");
+                initialize_radar_review();
+                show_radar_section(radarActiveSection, true);
+                $(this).attr("step", "radar-section");
                 $('#dataset_transfer_back_btn').show();
                 return;
             }
@@ -27,17 +34,33 @@ $(document).ready(function(){
                 $(this).attr("step", "3");
             }
         }
-        else if (step === "radar-metadata"){
+        else if (step === "radar-section"){
             let metadata = collect_radar_metadata();
-            let errors = validate_radar_metadata_in_browser(metadata);
+            let errors = errors_for_radar_section(
+                validate_radar_metadata_in_browser(metadata),
+                radarSectionOrder[radarActiveSection]
+            );
             if(errors.length){
                 show_radar_validation_errors(errors);
+                set_radar_section_status(radarSectionOrder[radarActiveSection], 'attention');
                 return;
             }
             clear_radar_validation_errors();
-            $('#publish_radar_metadata_step').hide();
-            $('#publish_step2').show();
-            $(this).attr("step", "3");
+            radarReviewedSections[radarSectionOrder[radarActiveSection]] = true;
+            set_radar_section_status(radarSectionOrder[radarActiveSection], 'complete');
+            if(radarActiveSection < radarSectionOrder.length - 1){
+                show_radar_section(radarActiveSection + 1, true);
+            }
+            else{
+                let allErrors = validate_radar_metadata_in_browser(metadata);
+                if(allErrors.length){
+                    show_radar_validation_errors(allErrors);
+                    return;
+                }
+                $('#publish_radar_metadata_step').hide();
+                $('#publish_step2').show();
+                $(this).attr("step", "3").text('Continue');
+            }
         }
         else if (step === "3"){          
             if($('#terms_of_usage').prop('checked') !== true || $('#rights_of_use').prop('checked') !== true){
@@ -65,17 +88,23 @@ $(document).ready(function(){
 
     $('#dataset_transfer_back_btn').click(function(){
         let step = $('#dataset_transfer_next_btn').attr('step');
-        if(step === 'radar-metadata'){
-            $('#publish_radar_metadata_step').hide();
-            $('#publish_destination_selection').show();
-            $('#publish_step1').show();
-            $('#dataset_transfer_next_btn').attr('step', '2');
-            $(this).hide();
+        if(step === 'radar-section'){
+            if(radarActiveSection > 0){
+                show_radar_section(radarActiveSection - 1, true);
+            }
+            else{
+                $('#publish_radar_metadata_step').hide();
+                $('#publish_destination_selection').show();
+                $('#publish_step1').show();
+                $('#dataset_transfer_next_btn').attr('step', '2').text('Continue');
+                $(this).hide();
+            }
         }
         else if(step === '3' && $('#publish_target').val() === 'radar'){
             $('#publish_step2').hide();
             $('#publish_radar_metadata_step').show();
-            $('#dataset_transfer_next_btn').attr('step', 'radar-metadata');
+            show_radar_section(radarSectionOrder.length - 1, true);
+            $('#dataset_transfer_next_btn').attr('step', 'radar-section');
         }
         else if(step === '3'){
             $('#publish_step2').hide();
@@ -132,13 +161,13 @@ $(document).ready(function(){
             }
             else {
                 if(data && data.errors && $('#publish_target').val() === 'radar'){
-                    show_radar_validation_errors(data.errors);
                     $('#publish_step_final').hide();
                     $('#publish_radar_metadata_step').show();
                     $('#action_btn_part').show();
-                    $('#dataset_transfer_next_btn').show().attr('step', 'radar-metadata');
+                    $('#dataset_transfer_next_btn').show().attr('step', 'radar-section');
                     $('#dataset_transfer_back_btn').show();
                     $('#dataset_transfer_submit').hide().data('publishing', false).prop('disabled', false);
+                    show_radar_validation_errors(data.errors);
                     return;
                 }
                 show_publish_failure(
@@ -233,7 +262,11 @@ $(document).ready(function(){
         add_radar_row($(this).closest('.radar-repeatable'), $(this).data('template'));
      });
      $(document).on('click', '.radar-remove', function(){
-        $(this).closest('.radar-row').remove();
+        let row = $(this).closest('.radar-row');
+        let publisherChanged = row.hasClass('radar-publisher-row');
+        row.remove();
+        if(publisherChanged){ sync_rights_holder_from_publisher(); }
+        mark_active_radar_section_unreviewed();
      });
      $(document).on('change', '.radar-publisher-scheme', function(){
         update_publisher_scheme($(this).closest('.radar-publisher-row'));
@@ -243,6 +276,59 @@ $(document).ready(function(){
      });
      $('.radar-publisher-row').each(function(){ update_publisher_scheme($(this)); });
      $('.radar-rights-holder-row').each(function(){ update_rights_holder_scheme($(this)); });
+     initialize_person_name_behaviour($('#publish_radar_metadata_step'));
+
+     $(document).on('click', '.radar-section-link', function(){
+        let targetIndex = radarSectionOrder.indexOf($(this).data('radar-section-target'));
+        if(targetIndex < 0 || targetIndex === radarActiveSection){ return; }
+        if(targetIndex > radarActiveSection){
+            let errors = errors_for_radar_section(
+                validate_radar_metadata_in_browser(collect_radar_metadata()),
+                radarSectionOrder[radarActiveSection]
+            );
+            if(errors.length){
+                set_radar_section_status(radarSectionOrder[radarActiveSection], 'attention');
+                show_radar_validation_errors(errors);
+                return;
+            }
+            radarReviewedSections[radarSectionOrder[radarActiveSection]] = true;
+            set_radar_section_status(radarSectionOrder[radarActiveSection], 'complete');
+        }
+        show_radar_section(targetIndex, true);
+     });
+
+     $(document).on('input change', '#publish_radar_metadata_step input, #publish_radar_metadata_step textarea, #publish_radar_metadata_step select', function(){
+        if(!$(this).is('#radar_rights_same_as_publisher')){
+            mark_active_radar_section_unreviewed();
+        }
+     });
+
+     $(document).on('input', '.radar-given-name, .radar-family-name', function(){
+        derive_person_name($(this).closest('.radar-person-row'));
+     });
+     $(document).on('input', '.radar-name', function(){
+        $(this).closest('.radar-person-row').data('radar-name-derived', false);
+     });
+     $(document).on('change', '.radar-creator-type', function(){
+        update_person_type($(this).closest('.radar-person-row'));
+     });
+     $(document).on('input', '.radar-publisher-identifier', function(){
+        detect_identifier_scheme($(this).closest('.radar-publisher-row'), 'publisher');
+        sync_rights_holder_from_publisher();
+     });
+     $(document).on('input change', '.radar-publisher-name, .radar-publisher-scheme', sync_rights_holder_from_publisher);
+     $(document).on('input', '.radar-rights-holder-identifier', function(){
+        detect_identifier_scheme($(this).closest('.radar-rights-holder-row'), 'rights-holder');
+     });
+     $('#radar_rights_same_as_publisher').change(toggle_rights_holder_same_as_publisher);
+
+     if($.fn.select2 && $('#radar_language').length){
+        $('#radar_language').select2({
+            width: '100%',
+            placeholder: $('#radar_language').data('placeholder'),
+            allowClear: true
+        });
+     }
 
 });
 
@@ -279,6 +365,173 @@ function update_publish_target_fields(){
         $('.radar-only').hide();
         $('#dataset_transfer_next_btn').text('Publish');
     }
+}
+
+function initialize_radar_review(){
+    let review = $('#publish_radar_metadata_step');
+    if(review.data('radar-review-initialized')){ return; }
+    review.data('radar-review-initialized', true);
+    radarActiveSection = 0;
+    initialize_person_name_behaviour(review);
+    review.find('.radar-publisher-row').each(function(){
+        detect_identifier_scheme($(this), 'publisher');
+    });
+    review.find('.radar-rights-holder-row').each(function(){
+        detect_identifier_scheme($(this), 'rights-holder');
+    });
+    show_radar_section(0, false);
+}
+
+function show_radar_section(index, moveFocus){
+    index = Math.max(0, Math.min(index, radarSectionOrder.length - 1));
+    radarActiveSection = index;
+    let key = radarSectionOrder[index];
+    $('.radar-review-section').prop('hidden', true).attr('aria-hidden', 'true');
+    let section = $('.radar-review-section[data-radar-section="' + key + '"]');
+    section.prop('hidden', false).attr('aria-hidden', 'false');
+    $('.radar-section-link').removeClass('is-active').attr('aria-selected', 'false');
+    $('.radar-section-link[data-radar-section-target="' + key + '"]')
+        .addClass('is-active').attr('aria-selected', 'true');
+    $('#dataset_transfer_next_btn')
+        .attr('step', 'radar-section')
+        .text(index === radarSectionOrder.length - 1 ? 'Continue to Consent' : 'Continue');
+    $('#dataset_transfer_back_btn').show();
+    if(moveFocus){
+        section.attr('tabindex', '-1').trigger('focus');
+        $('html, body').animate({scrollTop: $('#publish_radar_metadata_step').offset().top}, 150);
+    }
+}
+
+function radar_section_for_field(field){
+    let base = (field || '').split('.')[0];
+    let sections = {
+        title: 'dataset', descriptions: 'dataset', production_year: 'dataset',
+        resource_type: 'dataset', resource: 'dataset', version: 'dataset',
+        additional_titles: 'dataset', creators: 'creators',
+        contributors: 'classification', subject_areas: 'classification',
+        keywords: 'classification', language: 'classification',
+        publishers: 'rights', rights: 'rights', additional_rights: 'rights',
+        rights_holders: 'rights', funding_references: 'funding',
+        alternate_identifiers: 'funding', related_identifiers: 'funding',
+        data_sources: 'funding', software: 'funding', data_processing: 'funding',
+        related_information: 'funding'
+    };
+    return sections[base] || 'dataset';
+}
+
+function errors_for_radar_section(errors, section){
+    return $.grep(errors || [], function(error){
+        return radar_section_for_field(error.field) === section;
+    });
+}
+
+function set_radar_section_status(section, status){
+    let link = $('.radar-section-link[data-radar-section-target="' + section + '"]');
+    let labels = {complete: 'Complete', attention: 'Needs attention', pending: 'Not reviewed'};
+    link.removeClass('is-complete needs-attention')
+        .toggleClass('is-complete', status === 'complete')
+        .toggleClass('needs-attention', status === 'attention');
+    link.find('.radar-section-status').text(labels[status] || labels.pending);
+}
+
+function mark_active_radar_section_unreviewed(){
+    let section = radarSectionOrder[radarActiveSection];
+    radarReviewedSections[section] = false;
+    set_radar_section_status(section, 'pending');
+}
+
+function initialize_person_name_behaviour(scope){
+    scope.find('.radar-person-row').each(function(){
+        let row = $(this);
+        let name = clean_value(row.find('.radar-name').val());
+        row.data('radar-name-derived', !name);
+        if(!name){ derive_person_name(row); }
+        update_person_type(row);
+    });
+}
+
+function derive_person_name(row){
+    if(row.find('.radar-creator-type').val() !== 'person'){ return; }
+    let nameInput = row.find('.radar-name');
+    if(clean_value(nameInput.val()) && !row.data('radar-name-derived')){ return; }
+    let completeName = [
+        clean_value(row.find('.radar-given-name').val()),
+        clean_value(row.find('.radar-family-name').val())
+    ].filter(Boolean).join(' ');
+    nameInput.val(completeName);
+    row.data('radar-name-derived', true);
+}
+
+function update_person_type(row){
+    let isInstitution = row.find('.radar-creator-type').val() === 'institution';
+    row.toggleClass('radar-institution-row', isInstitution);
+    row.find('.radar-given-name, .radar-family-name').closest('.form-group')
+        .toggle(!isInstitution);
+    if(!isInstitution){ derive_person_name(row); }
+}
+
+function detect_identifier_scheme(row, kind){
+    let identifier = clean_value(row.find(
+        kind === 'publisher' ? '.radar-publisher-identifier' : '.radar-rights-holder-identifier'
+    ).val());
+    let scheme = row.find(
+        kind === 'publisher' ? '.radar-publisher-scheme' : '.radar-rights-holder-scheme'
+    );
+    if(/^(https:\/\/ror\.org\/)?0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$/i.test(identifier)){
+        scheme.val('ROR');
+    }
+    else if(/^(https?:\/\/orcid\.org\/)?\d{4}-\d{4}-\d{4}-[\dX]{4}$/i.test(identifier)){
+        scheme.val('ORCID');
+    }
+    else if(!identifier){
+        scheme.val('');
+    }
+    if(kind === 'publisher'){ update_publisher_scheme(row); }
+    else{ update_rights_holder_scheme(row); }
+}
+
+function toggle_rights_holder_same_as_publisher(){
+    let checkbox = $('#radar_rights_same_as_publisher');
+    let rows = $('[data-radar-list="rights_holders"] .radar-rows').first();
+    let publishers = $('[data-radar-list="publishers"] .radar-publisher-row');
+    let message = $('#radar_same_publisher_message');
+    if(checkbox.prop('checked')){
+        if(publishers.length !== 1){
+            checkbox.prop('checked', false);
+            toggle_rights_holder_same_as_publisher();
+            message.text('Select this option only when exactly one publisher is present.');
+            return;
+        }
+        rows.data('independent-rights-rows', rows.children().detach());
+        add_radar_row($('[data-radar-list="rights_holders"]'), 'rights-holder');
+        rows.children().last().addClass('radar-synced-rights-holder');
+        sync_rights_holder_from_publisher();
+        rows.find('input, select, button.radar-remove').prop('disabled', true);
+        message.text('The rights holder follows the current publisher. Clear the checkbox to restore the previous rights holders.');
+    }
+    else{
+        rows.find('.radar-synced-rights-holder').remove();
+        let previousRows = rows.data('independent-rights-rows');
+        if(previousRows && previousRows.length){ rows.append(previousRows); }
+        rows.removeData('independent-rights-rows');
+        message.empty();
+    }
+    mark_active_radar_section_unreviewed();
+}
+
+function sync_rights_holder_from_publisher(){
+    if(!$('#radar_rights_same_as_publisher').prop('checked')){ return; }
+    let publishers = $('[data-radar-list="publishers"] .radar-publisher-row');
+    if(publishers.length !== 1){
+        toggle_rights_holder_same_as_publisher();
+        return;
+    }
+    let publisher = publishers.first();
+    let holder = $('.radar-synced-rights-holder').first();
+    holder.find('.radar-rights-holder-name').val(publisher.find('.radar-publisher-name').val());
+    holder.find('.radar-rights-holder-identifier').val(publisher.find('.radar-publisher-identifier').val());
+    holder.find('.radar-rights-holder-scheme').val(publisher.find('.radar-publisher-scheme').val());
+    holder.find('.radar-rights-holder-scheme-uri').val(publisher.find('.radar-publisher-scheme-uri').val());
 }
 
 function clean_value(value){
@@ -341,12 +594,18 @@ function validate_radar_metadata_in_browser(metadata){
         if(['person', 'institution'].indexOf(creator.creator_type) === -1){ errors.push({field: 'creators.' + index + '.creator_type', message: 'Please select whether the creator is a person or institution.'}); }
         if(!personName){ errors.push({field: 'creators.' + index + '.name', message: 'Please provide the creator name.'}); }
         if(creator.needs_review){ errors.push({field: 'creators.' + index + '.needs_review', message: 'Please verify the automatically extracted given and family names.'}); }
+        if(creator.orcid && !valid_orcid_format(creator.orcid)){ errors.push({field: 'creators.' + index + '.orcid', message: 'Please provide a valid ORCID.'}); }
+        if(creator.affiliation_ror && !valid_ror_format(creator.affiliation_ror)){ errors.push({field: 'creators.' + index + '.affiliation_ror', message: 'Please provide a valid ROR identifier.'}); }
+        if(creator.affiliation_ror && !creator.affiliation){ errors.push({field: 'creators.' + index + '.affiliation', message: 'Provide an affiliation name when a ROR identifier is supplied.'}); }
     });
     $.each(metadata.contributors, function(index, contributor){
         let personName = contributor.name || contributor.given_name || contributor.family_name;
         if(['person', 'institution'].indexOf(contributor.creator_type) === -1){ errors.push({field: 'contributors.' + index + '.creator_type', message: 'Please select whether the contributor is a person or institution.'}); }
         if(!personName){ errors.push({field: 'contributors.' + index + '.name', message: 'Please provide the contributor name.'}); }
         if(contributor.needs_review){ errors.push({field: 'contributors.' + index + '.needs_review', message: 'Please verify the automatically extracted given and family names.'}); }
+        if(contributor.orcid && !valid_orcid_format(contributor.orcid)){ errors.push({field: 'contributors.' + index + '.orcid', message: 'Please provide a valid ORCID.'}); }
+        if(contributor.affiliation_ror && !valid_ror_format(contributor.affiliation_ror)){ errors.push({field: 'contributors.' + index + '.affiliation_ror', message: 'Please provide a valid ROR identifier.'}); }
+        if(contributor.affiliation_ror && !contributor.affiliation){ errors.push({field: 'contributors.' + index + '.affiliation', message: 'Provide an affiliation name when a ROR identifier is supplied.'}); }
     });
     if(!metadata.production_year){ errors.push({field: 'production_year', message: 'Please provide the production year.'}); }
     if(!metadata.subject_areas.length){ errors.push({field: 'subject_areas', message: 'Please select a scientific subject area.'}); }
@@ -359,14 +618,31 @@ function validate_radar_metadata_in_browser(metadata){
     if(!subjectAreas['engineering|']){ errors.push({field: 'subject_areas', message: 'Engineering is required as a subject area.'}); }
     if(metadata.resource_type !== 'Dataset'){ errors.push({field: 'resource_type', message: 'RADAR resource type must be Dataset.'}); }
     if(!metadata.publishers.length || !metadata.publishers[0].name){ errors.push({field: 'publishers', message: 'Please provide a publisher.'}); }
+    $.each(metadata.publishers, function(index, publisher){
+        if(publisher.name_identifier_scheme === 'ROR' && publisher.name_identifier && !valid_ror_format(publisher.name_identifier)){ errors.push({field: 'publishers.' + index + '.name_identifier', message: 'Please provide a valid publisher ROR identifier.'}); }
+        if(publisher.name_identifier_scheme === 'ORCID' && publisher.name_identifier && !valid_orcid_format(publisher.name_identifier)){ errors.push({field: 'publishers.' + index + '.name_identifier', message: 'Please provide a valid publisher ORCID.'}); }
+    });
     if(!metadata.rights){ errors.push({field: 'rights', message: 'Please select a licence.'}); }
     if(!metadata.rights_holders.length){ errors.push({field: 'rights_holders', message: 'Please provide a rights holder.'}); }
+    $.each(metadata.rights_holders, function(index, holder){
+        if(!holder.name){ errors.push({field: 'rights_holders.' + index + '.name', message: 'Please provide the rights holder name.'}); }
+        if(holder.name_identifier_scheme === 'ROR' && holder.name_identifier && !valid_ror_format(holder.name_identifier)){ errors.push({field: 'rights_holders.' + index + '.name_identifier', message: 'Please provide a valid rights holder ROR identifier.'}); }
+        if(holder.name_identifier_scheme === 'ORCID' && holder.name_identifier && !valid_orcid_format(holder.name_identifier)){ errors.push({field: 'rights_holders.' + index + '.name_identifier', message: 'Please provide a valid rights holder ORCID.'}); }
+    });
     $.each(metadata.related_identifiers, function(index, identifier){
         if(!identifier.relation_type){
             errors.push({field: 'related_identifiers.' + index + '.relation_type', message: 'Please select a relationship for every related identifier.'});
         }
     });
     return errors;
+}
+
+function valid_orcid_format(value){
+    return /^(https?:\/\/orcid\.org\/)?\d{4}-\d{4}-\d{4}-[\dX]{4}$/i.test(clean_value(value));
+}
+
+function valid_ror_format(value){
+    return /^(https:\/\/ror\.org\/)?0[0-9a-hj-km-np-tv-z]{6}[0-9]{2}$/i.test(clean_value(value));
 }
 
 function render_radar_confirmation(metadata){
@@ -488,32 +764,45 @@ function clear_radar_validation_errors(){
 function show_radar_validation_errors(errors){
     clear_radar_validation_errors();
     let list = $('<ul></ul>');
+    let firstSection = null;
     $.each(errors, function(_, error){
         list.append($('<li></li>').text(error.message));
         let base = (error.field || '').split('.')[0];
+        let section = radar_section_for_field(error.field);
+        firstSection = firstSection || section;
+        set_radar_section_status(section, 'attention');
         let group = $('[data-radar-field="' + base + '"]').first();
         group.addClass('has-error').append($('<span class="help-block radar-error"></span>').text(error.message));
         group.closest('details').prop('open', true);
     });
+    if(firstSection){
+        show_radar_section(radarSectionOrder.indexOf(firstSection), false);
+    }
     $('#radar_validation_summary').append($('<strong></strong>').text('Please correct the following RADAR metadata:')).append(list).show();
     $('html, body').animate({scrollTop: $('#publish_radar_metadata_step').offset().top}, 200);
+    $('#radar_validation_summary').trigger('focus');
 }
 
 function add_radar_row(container, template){
-    let remove = '<div class="col-md-1"><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>';
+    radarDynamicRowId += 1;
+    let id = 'radar_dynamic_' + radarDynamicRowId;
+    let remove = '<div class="col-md-1 radar-remove-column"><button type="button" class="btn btn-default btn-sm radar-remove" aria-label="Remove">&times;</button></div>';
     let html = '';
-    if(template === 'text'){ html = '<div class="radar-row input-group"><input class="form-control radar-value"><span class="input-group-btn"><button type="button" class="btn btn-danger radar-remove">&times;</button></span></div>'; }
-    else if(template === 'publisher'){ html = '<div class="radar-row radar-publisher-row"><div class="row"><div class="col-md-5"><label>Publisher Name *</label><input class="form-control radar-publisher-name"></div><div class="col-md-5"><label>Publisher Identifier</label><input class="form-control radar-publisher-identifier"></div>' + remove + '</div><div class="row"><div class="col-md-5"><label>Identifier Scheme</label><select class="form-control radar-publisher-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div><div class="col-md-5"><label>Scheme URI</label><input class="form-control radar-publisher-scheme-uri" readonly></div></div></div>'; }
-    else if(template === 'rights-holder'){ html = '<div class="radar-row radar-rights-holder-row"><div class="row"><div class="col-md-5"><label>Rights Holder Name *</label><input class="form-control radar-rights-holder-name"></div><div class="col-md-5"><label>Name Identifier</label><input class="form-control radar-rights-holder-identifier"></div>' + remove + '</div><div class="row"><div class="col-md-5"><label>Identifier Scheme</label><select class="form-control radar-rights-holder-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div><div class="col-md-5"><label>Scheme URI</label><input class="form-control radar-rights-holder-scheme-uri" readonly></div></div></div>'; }
-    else if(template === 'textarea'){ html = '<div class="radar-row"><textarea class="form-control radar-value" rows="3"></textarea><button type="button" class="btn btn-danger btn-sm radar-remove">&times;</button></div>'; }
+    if(template === 'text'){ html = '<div class="radar-row input-group"><label class="sr-only" for="' + id + '">Value</label><input id="' + id + '" class="form-control radar-value"><span class="input-group-btn"><button type="button" class="btn btn-default radar-remove" aria-label="Remove">&times;</button></span></div>'; }
+    else if(template === 'publisher'){
+        html = '<div class="radar-row radar-publisher-row"><div class="radar-card-heading"><strong>Publisher</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row"><div class="col-md-6 form-group"><label for="' + id + '_name">Publisher Name *</label><input id="' + id + '_name" class="form-control radar-publisher-name"></div><div class="col-md-6 form-group"><label for="' + id + '_identifier">Publisher Identifier</label><input id="' + id + '_identifier" class="form-control radar-publisher-identifier" placeholder="https://ror.org/..."></div></div><div class="row radar-identifier-details"><div class="col-md-6 form-group"><label for="' + id + '_scheme">Identifier Scheme</label><select id="' + id + '_scheme" class="form-control radar-publisher-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div></div><input type="hidden" class="radar-publisher-scheme-uri"></div>';
+    }
+    else if(template === 'rights-holder'){
+        html = '<div class="radar-row radar-rights-holder-row"><div class="radar-card-heading"><strong>Rights Holder</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row"><div class="col-md-6 form-group"><label for="' + id + '_name">Rights Holder Name *</label><input id="' + id + '_name" class="form-control radar-rights-holder-name"></div><div class="col-md-6 form-group"><label for="' + id + '_identifier">Name Identifier</label><input id="' + id + '_identifier" class="form-control radar-rights-holder-identifier" placeholder="https://ror.org/..."></div></div><div class="row radar-identifier-details"><div class="col-md-6 form-group"><label for="' + id + '_scheme">Identifier Scheme</label><select id="' + id + '_scheme" class="form-control radar-rights-holder-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div></div><input type="hidden" class="radar-rights-holder-scheme-uri"></div>';
+    }
+    else if(template === 'textarea'){ html = '<div class="radar-row"><label class="sr-only" for="' + id + '">Description</label><textarea id="' + id + '" class="form-control radar-value" rows="3"></textarea><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div>'; }
     else if(template === 'creator' || template === 'contributor'){
-        let role = template === 'contributor' ? '<div class="col-md-3"><select class="form-control radar-contributor-type">' + $('#radar-template-options').html() + '</select></div>' : '';
-        let creatorType = '<div class="col-md-3"><select class="form-control radar-creator-type"><option value="person" selected>Person and affiliation</option><option value="institution">Institution</option></select></div>';
-        let namePlaceholder = template === 'contributor' ? 'Contributor name *' : 'Creator name *';
-        html = '<div class="radar-row radar-person-row"><div class="row">' + creatorType + '<div class="col-md-3"><input class="form-control radar-name" placeholder="' + namePlaceholder + '"></div><div class="col-md-3"><input class="form-control radar-given-name" placeholder="Given name"></div><div class="col-md-2"><input class="form-control radar-family-name" placeholder="Family name"></div>' + remove + '</div><div class="row"><div class="col-md-3"><input class="form-control radar-orcid" placeholder="ORCID"></div><div class="col-md-3"><input class="form-control radar-affiliation" placeholder="Affiliation"></div><div class="col-md-3"><input class="form-control radar-affiliation-ror" placeholder="Affiliation ROR"></div>' + role + '</div></div>';
+        let label = template === 'contributor' ? 'Contributor' : 'Creator';
+        let role = template === 'contributor' ? '<div class="col-md-3 form-group"><label for="' + id + '_role">Role</label><select id="' + id + '_role" class="form-control radar-contributor-type">' + $('#radar-template-options').html() + '</select></div>' : '';
+        html = '<div class="radar-row radar-person-row radar-person-card' + (template === 'contributor' ? ' radar-contributor-row' : '') + '"><div class="radar-card-heading"><strong>' + label + '</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row radar-personal-fields"><div class="col-md-4 form-group"><label for="' + id + '_type">' + label + ' Type</label><select id="' + id + '_type" class="form-control radar-creator-type"><option value="person" selected>Person and affiliation</option><option value="institution">Institution</option></select></div><div class="col-md-4 form-group"><label for="' + id + '_given">Given Name</label><input id="' + id + '_given" class="form-control radar-given-name"></div><div class="col-md-4 form-group"><label for="' + id + '_family">Family Name</label><input id="' + id + '_family" class="form-control radar-family-name"></div></div><div class="row"><div class="col-md-' + (template === 'contributor' ? '5' : '7') + ' form-group"><label for="' + id + '_name">' + (template === 'contributor' ? 'Complete Name' : 'Creator Name *') + '</label><input id="' + id + '_name" class="form-control radar-name"></div><div class="col-md-' + (template === 'contributor' ? '4' : '5') + ' form-group"><label for="' + id + '_orcid">ORCID</label><input id="' + id + '_orcid" class="form-control radar-orcid" placeholder="https://orcid.org/0000-0000-0000-0000"></div>' + role + '</div><div class="row radar-affiliation-fields"><div class="col-md-6 form-group"><label for="' + id + '_affiliation">Affiliation</label><input id="' + id + '_affiliation" class="form-control radar-affiliation"></div><div class="col-md-6 form-group"><label for="' + id + '_ror">Affiliation ROR</label><input id="' + id + '_ror" class="form-control radar-affiliation-ror" placeholder="https://ror.org/..."></div></div></div>';
     }
     else if(template === 'subject-area'){ html = '<div class="radar-row row"><div class="col-md-5"><select class="form-control radar-subject-controlled">' + $('#radar-template-subject-options').html() + '</select></div><div class="col-md-6"><input class="form-control radar-subject-additional" placeholder="Specify when Other"></div>' + remove + '</div>'; }
-    else if(template === 'keyword'){ html = '<div class="radar-row row"><div class="col-md-4"><input class="form-control radar-value" placeholder="Keyword"></div><div class="col-md-2"><select class="form-control radar-keyword-scheme"><option>Other</option><option>GND</option></select></div><div class="col-md-2"><input class="form-control radar-value-uri" placeholder="Value URI"></div><div class="col-md-2"><input class="form-control radar-ontology-id" placeholder="Ontology ID"></div>' + remove + '</div>'; }
+    else if(template === 'keyword'){ html = '<div class="radar-row radar-keyword-row"><div class="row"><div class="col-md-11"><label for="' + id + '">Keyword</label><input id="' + id + '" class="form-control radar-value"></div>' + remove + '</div><input type="hidden" class="radar-keyword-scheme" value="Other"><input type="hidden" class="radar-scheme-uri"><input type="hidden" class="radar-value-uri"><input type="hidden" class="radar-classification-code"><input type="hidden" class="radar-ontology-uri"><input type="hidden" class="radar-ontology-id"></div>'; }
     else if(template === 'additional-title'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Title"></div><div class="col-md-4"><select class="form-control radar-type">' + $('#radar-template-additional-title-options').html() + '</select></div>' + remove + '</div>'; }
     else if(template === 'description'){ html = '<div class="radar-row row"><div class="col-md-7"><textarea class="form-control radar-value" rows="2" placeholder="Description"></textarea></div><div class="col-md-4"><select class="form-control radar-type">' + $('#radar-template-description-options').html() + '</select></div>' + remove + '</div>'; }
     else if(template === 'alternate-identifier'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Identifier"></div><div class="col-md-4"><input class="form-control radar-type" placeholder="Identifier type"></div>' + remove + '</div>'; }
@@ -521,8 +810,21 @@ function add_radar_row(container, template){
     else if(template === 'data-source'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Source description"></div><div class="col-md-4"><select class="form-control radar-type">' + $('#radar-template-data-source-options').html() + '</select></div>' + remove + '</div>'; }
     else if(template === 'software'){ html = '<div class="radar-row row"><div class="col-md-3"><input class="form-control radar-name" placeholder="Software name"></div><div class="col-md-2"><input class="form-control radar-version" placeholder="Version"></div><div class="col-md-3"><select class="form-control radar-type">' + $('#radar-template-software-options').html() + '</select></div><div class="col-md-3"><input class="form-control radar-alternative-name" placeholder="Alternative name"></div>' + remove + '</div>'; }
     else if(template === 'related-information'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Information"></div><div class="col-md-4"><input class="form-control radar-type" placeholder="Information type"></div>' + remove + '</div>'; }
-    else if(template === 'funding'){ html = '<div class="radar-row"><div class="row"><div class="col-md-4"><input class="form-control radar-funder-name" placeholder="Funder name"></div><div class="col-md-3"><input class="form-control radar-funder-identifier" placeholder="Funder identifier"></div><div class="col-md-2"><select class="form-control radar-funder-type">' + $('#radar-template-funder-options').html() + '</select></div><div class="col-md-2"><input class="form-control radar-scheme-uri" placeholder="Scheme URI"></div>' + remove + '</div><div class="row"><div class="col-md-4"><input class="form-control radar-award-number" placeholder="Award number"></div><div class="col-md-4"><input class="form-control radar-award-uri" placeholder="Award URI"></div><div class="col-md-4"><input class="form-control radar-award-title" placeholder="Award title"></div></div></div>'; }
-    container.find('.radar-rows').first().append(html);
+    else if(template === 'funding'){ html = '<div class="radar-row radar-funding-row"><div class="radar-card-heading"><strong>Additional Funding Reference</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row"><div class="col-md-4 form-group"><label>Funder Name</label><input class="form-control radar-funder-name"></div><div class="col-md-4 form-group"><label>Funder Identifier</label><input class="form-control radar-funder-identifier"></div><div class="col-md-4 form-group"><label>Identifier Type</label><select class="form-control radar-funder-type"><option value=""></option>' + $('#radar-template-funder-options').html() + '</select></div></div><div class="form-group"><label>Funder Scheme URI</label><input class="form-control radar-scheme-uri"></div><div class="row"><div class="col-md-4 form-group"><label>Award Number</label><input class="form-control radar-award-number"></div><div class="col-md-4 form-group"><label>Award URI</label><input class="form-control radar-award-uri"></div><div class="col-md-4 form-group"><label>Project Title</label><input class="form-control radar-award-title"></div></div></div>'; }
+    let rows = container.find('.radar-rows').first();
+    rows.append(html);
+    let newRow = rows.children().last();
+    initialize_person_name_behaviour(newRow);
+    if(template === 'publisher'){
+        update_publisher_scheme(newRow);
+        if($('#radar_rights_same_as_publisher').prop('checked')){
+            $('#radar_rights_same_as_publisher').prop('checked', false);
+            toggle_rights_holder_same_as_publisher();
+            $('#radar_same_publisher_message').text('The publisher list changed. Confirm the rights holder selection again.');
+        }
+    }
+    else if(template === 'rights-holder'){ update_rights_holder_scheme(newRow); }
+    mark_active_radar_section_unreviewed();
 }
 
 function update_publisher_scheme(row){

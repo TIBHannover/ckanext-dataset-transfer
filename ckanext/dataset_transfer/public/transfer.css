@@ -57,71 +57,218 @@
   display: none;
 }
 
-.radar-section {
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  margin: 0 0 20px;
-  padding: 15px;
+#publish_radar_metadata_step {
+  color: inherit;
+  font: inherit;
 }
 
-.radar-section legend {
-  border: 0;
-  margin-bottom: 12px;
-  width: auto;
+#publish_radar_metadata_step [hidden] {
+  display: none !important;
 }
 
-.radar-imported {
-  border-left: 4px solid #31708f;
-  padding-left: 12px;
-}
-
-.radar-required.has-error, .form-group.has-error {
-  border-left-color: #a94442;
-}
-
-.radar-repeatable {
+#publish_radar_metadata_step .radar-review-introduction {
   margin-bottom: 20px;
 }
 
-.radar-row {
-  background: #f8f8f8;
-  border: 1px solid #e5e5e5;
-  border-radius: 3px;
-  margin: 0 0 10px;
-  padding: 10px;
+#publish_radar_metadata_step .radar-review-introduction h3 {
+  margin-bottom: 8px;
 }
 
-.radar-row.row {
+#publish_radar_metadata_step .radar-review-introduction .alert {
+  margin: 14px 0 8px;
+}
+
+#publish_radar_metadata_step .radar-section-navigation {
+  border-bottom: 1px solid #ddd;
+  margin: 0 0 20px;
+}
+
+#publish_radar_metadata_step .radar-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#publish_radar_metadata_step .radar-section-nav li {
+  display: flex;
+  flex: 1 1 155px;
+}
+
+#publish_radar_metadata_step .radar-section-link {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: #555;
+  min-height: 58px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+#publish_radar_metadata_step .radar-section-link:hover,
+#publish_radar_metadata_step .radar-section-link:focus {
+  background: #f5f5f5;
+  color: #333;
+  outline: 2px solid transparent;
+}
+
+#publish_radar_metadata_step .radar-section-link.is-active {
+  border-bottom-color: #337ab7;
+  color: #333;
+  font-weight: 600;
+}
+
+#publish_radar_metadata_step .radar-section-status {
+  color: #777;
+  display: block;
+  font-size: 12px;
+  font-weight: normal;
+  margin-top: 3px;
+}
+
+#publish_radar_metadata_step .radar-section-link.is-complete .radar-section-status::before {
+  content: "\2713\00a0";
+}
+
+#publish_radar_metadata_step .radar-section-link.needs-attention .radar-section-status {
+  color: #a94442;
+  font-weight: 600;
+}
+
+#publish_radar_metadata_step .radar-section {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin: 0;
+  min-width: 0;
+  padding: 18px;
+}
+
+#publish_radar_metadata_step .radar-section:focus {
+  outline: 2px solid #66afe9;
+  outline-offset: 2px;
+}
+
+#publish_radar_metadata_step .radar-section legend {
+  border: 0;
+  margin: 0 0 16px;
+  padding: 0;
+  width: auto;
+}
+
+#publish_radar_metadata_step .radar-status-badge {
+  background: #eee;
+  border: 1px solid #d5d5d5;
+  border-radius: 3px;
+  color: #555;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-left: 5px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
+#publish_radar_metadata_step .radar-status-imported {
+  background: #d9edf7;
+  border-color: #bce8f1;
+  color: #31708f;
+}
+
+#publish_radar_metadata_step .radar-status-check {
+  background: #fcf8e3;
+  border-color: #faebcc;
+  color: #8a6d3b;
+}
+
+#publish_radar_metadata_step .radar-repeatable {
+  margin-bottom: 22px;
+}
+
+#publish_radar_metadata_step .radar-row {
+  background: #fafafa;
+  border: 1px solid #e5e5e5;
+  border-radius: 3px;
+  margin: 0 0 12px;
+  padding: 14px;
+}
+
+#publish_radar_metadata_step .radar-row.row {
   margin-left: 0;
   margin-right: 0;
 }
 
-.radar-person-row .row + .row {
-  margin-top: 8px;
+#publish_radar_metadata_step .radar-card-heading {
+  align-items: center;
+  border-bottom: 1px solid #e5e5e5;
+  display: flex;
+  justify-content: space-between;
+  margin: -2px 0 14px;
+  padding-bottom: 8px;
 }
 
-.radar-needs-review {
-  border-color: #8a6d3b;
-  border-left: 4px solid #8a6d3b;
+#publish_radar_metadata_step .radar-person-row .row + .row,
+#publish_radar_metadata_step .radar-funding-row .row + .row {
+  margin-top: 4px;
 }
 
-.radar-creator-warning {
-  margin-bottom: 10px;
+#publish_radar_metadata_step .radar-needs-review {
+  border-color: #d6c38b;
 }
 
-.radar-creator-warning .checkbox {
+#publish_radar_metadata_step .radar-creator-warning {
+  margin-bottom: 14px;
+}
+
+#publish_radar_metadata_step .radar-creator-warning .checkbox {
   margin-bottom: 0;
 }
 
-.radar-remove {
-  margin-top: 2px;
+#publish_radar_metadata_step .radar-remove-column {
+  padding-top: 25px;
+  text-align: right;
 }
 
-.radar-optional summary {
+#publish_radar_metadata_step .radar-fixed-line {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+#publish_radar_metadata_step .radar-fixed-display {
+  border-bottom: 1px solid #eee;
+  border-top: 1px solid #eee;
+  margin: 25px 0;
+  padding: 16px 0;
+}
+
+#publish_radar_metadata_step .radar-funding-summary p {
+  margin: 3px 0;
+}
+
+#publish_radar_metadata_step .radar-optional {
+  border-top: 1px solid #ddd;
+  margin-top: 22px;
+  padding-top: 15px;
+}
+
+#publish_radar_metadata_step .radar-optional summary {
   cursor: pointer;
-  font-size: 18px;
-  font-weight: bold;
+  font-size: inherit;
+  font-weight: 600;
   margin-bottom: 15px;
+}
+
+#publish_radar_metadata_step .select2-container {
+  max-width: 100%;
+}
+
+#publish_radar_metadata_step .has-error {
+  border-left: 3px solid #a94442;
+  padding-left: 10px;
 }
 
 #radar_validation_summary {
@@ -159,9 +306,38 @@
   border-color: #a94442;
 }
 
-.radar-funding-warning {
+#publish_radar_metadata_step .radar-funding-warning {
   margin: 10px 0 0;
   padding: 8px 12px;
+}
+
+@media (max-width: 767px) {
+  #publish_radar_metadata_step .radar-section-nav {
+    display: block;
+  }
+
+  #publish_radar_metadata_step .radar-section-nav li {
+    display: block;
+  }
+
+  #publish_radar_metadata_step .radar-section-link {
+    border-bottom-width: 1px;
+    min-height: 0;
+  }
+
+  #publish_radar_metadata_step .radar-section-link.is-active {
+    border-left: 3px solid #337ab7;
+    border-bottom-color: #ddd;
+  }
+
+  #publish_radar_metadata_step .radar-section {
+    padding: 14px;
+  }
+
+  #publish_radar_metadata_step .radar-remove-column {
+    padding-top: 8px;
+    text-align: left;
+  }
 }
 
 .radar-confirmation-table th {
