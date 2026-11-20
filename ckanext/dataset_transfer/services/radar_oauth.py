@@ -4,30 +4,30 @@ import base64
 import datetime
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-import requests
 import ckan.plugins.toolkit as toolkit
-from ckan.model import meta
+import redis
+import requests
 from cryptography.fernet import Fernet, InvalidToken
-
-from ckanext.dataset_transfer.models.radar_oauth import (
-    RadarOAuthState,
-    RadarOAuthToken,
-)
+from redis.exceptions import RedisError
 
 
 class RadarOAuthError(Exception):
     def __init__(
-        self, message, status=None, flow_consumed=False, dataset_name=None
+        self, message, status=None, flow_consumed=False, dataset_name=None,
+        dataset_id=None, attempt_id=None
     ):
         super(RadarOAuthError, self).__init__(message)
         self.status = status
         self.flow_consumed = flow_consumed
         self.dataset_name = dataset_name
+        self.dataset_id = dataset_id
+        self.attempt_id = attempt_id
 
 
 class RadarOAuthConfigError(RadarOAuthError):
@@ -46,24 +46,57 @@ class RadarOAuthTemporaryError(RadarOAuthError):
     pass
 
 
+class RadarOAuthAttemptClaimed(RadarOAuthError):
+    pass
+
+
 class RadarUserTokenProvider(object):
-    def __init__(self, oauth_service, user_id):
+    def __init__(
+        self, oauth_service, user_id, dataset_id, session_binding, attempt_id
+    ):
         self.oauth_service = oauth_service
         self.user_id = user_id
+        self.dataset_id = dataset_id
+        self.session_binding = session_binding
+        self.attempt_id = attempt_id
 
     def get_valid_access_token(self):
-        return self.oauth_service.get_valid_access_token(self.user_id)
+        return self.oauth_service.get_valid_access_token(
+            self.user_id,
+            self.dataset_id,
+            self.session_binding,
+            self.attempt_id,
+            require_claimed=True,
+        )
 
     def mark_reauthentication_required(self):
-        self.oauth_service.mark_reauthentication_required(self.user_id)
+        self.oauth_service.mark_reauthentication_required(
+            self.user_id,
+            self.dataset_id,
+            self.session_binding,
+            self.attempt_id,
+        )
 
 
 class RadarOAuthService(object):
     STATE_TTL_SECONDS = 600
+    ATTEMPT_TTL_SECONDS = 3600
+    ACTIVE_ATTEMPT_TTL_SECONDS = 7200
     TOKEN_TIMEOUT_SECONDS = 30
     REFRESH_MARGIN_SECONDS = 300
+    LOCK_TIMEOUT_SECONDS = 30
+    KEY_PREFIX = "ckanext:dataset_transfer:radar:oauth"
+    GETDEL_SCRIPT = """
+local value = redis.call('GET', KEYS[1])
+if value then
+  redis.call('DEL', KEYS[1])
+end
+return value
+"""
 
-    def __init__(self, config=None, request_session=None, now=None):
+    def __init__(
+        self, config=None, request_session=None, now=None, redis_client=None
+    ):
         self.config = config or toolkit.config
         self.requests = request_session or requests
         self.now = now or datetime.datetime.utcnow
@@ -104,10 +137,25 @@ class RadarOAuthService(object):
             "ckanext.dataset_transfer.radar.oauth_pkce_enabled", False
         )
         self.state_ttl = self._positive_integer(
-            "ckanext.dataset_transfer.radar.oauth_state_ttl", self.STATE_TTL_SECONDS
+            "ckanext.dataset_transfer.radar.oauth_state_ttl",
+            self.STATE_TTL_SECONDS,
         )
+        self.attempt_ttl = self._positive_integer(
+            "ckanext.dataset_transfer.radar.oauth_attempt_ttl",
+            self.ATTEMPT_TTL_SECONDS,
+        )
+        self.active_attempt_ttl = self._positive_integer(
+            "ckanext.dataset_transfer.radar.oauth_active_attempt_ttl",
+            self.ACTIVE_ATTEMPT_TTL_SECONDS,
+        )
+        if self.active_attempt_ttl < self.attempt_ttl:
+            raise RadarOAuthConfigError(
+                "RADAR OAuth active-attempt TTL must not be shorter than "
+                "the review-attempt TTL."
+            )
         self.timeout = self._positive_integer(
-            "ckanext.dataset_transfer.radar.oauth_timeout", self.TOKEN_TIMEOUT_SECONDS
+            "ckanext.dataset_transfer.radar.oauth_timeout",
+            self.TOKEN_TIMEOUT_SECONDS,
         )
         self.refresh_margin = self._positive_integer(
             "ckanext.dataset_transfer.radar.oauth_refresh_margin",
@@ -124,6 +172,13 @@ class RadarOAuthService(object):
                 "RADAR OAuth token encryption key is invalid."
             ) from error
         self._validate_environment_hosts()
+        self.redis = redis_client or self._create_redis_client()
+        try:
+            self.redis.ping()
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
 
     @classmethod
     def configuration_status(cls, config=None):
@@ -134,29 +189,56 @@ class RadarOAuthService(object):
             return {
                 "configured": False,
                 "message": (
-                    "RADAR4Ing account connections are not configured on this "
-                    "CKAN instance."
+                    "RADAR4Ing temporary authentication is not configured on "
+                    "this CKAN instance."
+                ),
+            }
+        except RadarOAuthTemporaryError:
+            return {
+                "configured": False,
+                "temporarily_unavailable": True,
+                "message": (
+                    "RADAR4Ing temporary authentication storage is unavailable."
                 ),
             }
 
-    def authorization_url(self, user_id, dataset_name, session_binding=None):
-        if not user_id or not dataset_name:
+    def authorization_url(
+        self, user_id, dataset_id, dataset_name, session_binding=None
+    ):
+        if not user_id or not dataset_id or not dataset_name:
             raise RadarOAuthError("A CKAN user and dataset are required.")
         state = secrets.token_urlsafe(48)
+        state_id = self._hash(state)
+        attempt_id = secrets.token_urlsafe(32)
         session_binding = session_binding or secrets.token_urlsafe(48)
         code_verifier = secrets.token_urlsafe(64) if self.pkce_enabled else ""
-        now = self.now()
-        RadarOAuthState.delete_open_for_user(user_id, self.environment)
-        flow = RadarOAuthState(
-            ckan_user_id=user_id,
-            radar_environment=self.environment,
-            state_hash=self._hash(state),
-            session_binding_hash=self._hash(session_binding),
-            code_verifier_encrypted=self._encrypt_optional(code_verifier),
-            dataset_name=str(dataset_name)[:200],
-            created_at=now,
-        )
-        flow.save()
+        flow = {
+            "user_id": str(user_id),
+            "dataset_id": str(dataset_id),
+            "dataset_name": str(dataset_name)[:200],
+            "environment": self.environment,
+            "session_binding_hash": self._hash(session_binding),
+            "code_verifier": code_verifier,
+            "attempt_id": attempt_id,
+            "created_at": self._timestamp(),
+        }
+        try:
+            stored = self.redis.set(
+                self._state_key(state_id),
+                self._seal_json(flow),
+                ex=self.state_ttl,
+                nx=True,
+            )
+            if not stored:
+                raise RadarOAuthTemporaryError(
+                    "RADAR OAuth state could not be created."
+                )
+        except RadarOAuthError:
+            raise
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
         parameters = {
             "client_id": self.client_id,
             "response_type": "code",
@@ -169,68 +251,108 @@ class RadarOAuthService(object):
                 digest
             ).decode("ascii").rstrip("=")
             parameters["code_challenge_method"] = "S256"
-        return self._url_with_query(self.authorize_url, parameters), session_binding
+        return (
+            self._url_with_query(self.authorize_url, parameters),
+            session_binding,
+            state_id,
+        )
 
     def complete_authorization(
         self, user_id, state, session_binding, code=None, provider_error=None
     ):
         if not state or not session_binding:
             raise RadarOAuthStateError("RADAR OAuth state is missing or invalid.")
-        state_hash = self._hash(state)
-        flow = RadarOAuthState.get_by_state_hash(
-            state_hash, for_update=True
-        )
-        if not flow or flow.used_at is not None:
-            raise RadarOAuthStateError("RADAR OAuth state is invalid or already used.")
-        if not hmac.compare_digest(flow.state_hash, state_hash):
-            raise RadarOAuthStateError("RADAR OAuth state is invalid.")
-        if flow.ckan_user_id != user_id or flow.radar_environment != self.environment:
-            raise RadarOAuthStateError("RADAR OAuth state belongs to another session.")
-        if not hmac.compare_digest(
-            flow.session_binding_hash, self._hash(session_binding)
-        ):
-            raise RadarOAuthStateError("RADAR OAuth session binding is invalid.")
-        if flow.created_at < self.now() - datetime.timedelta(seconds=self.state_ttl):
-            flow.used_at = self.now()
-            flow.save()
-            raise RadarOAuthStateError(
-                "RADAR OAuth state has expired.",
-                flow_consumed=True,
-                dataset_name=flow.dataset_name,
+        state_id = self._hash(state)
+        try:
+            sealed_flow = self.redis.eval(
+                self.GETDEL_SCRIPT, 1, self._state_key(state_id)
             )
-        flow.used_at = self.now()
-        flow.save()
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
+        if not sealed_flow:
+            raise RadarOAuthStateError(
+                "RADAR OAuth state is invalid, expired, or already used."
+            )
+        flow = self._open_json(sealed_flow, state_error=True)
+        details = {
+            "flow_consumed": True,
+            "dataset_name": flow.get("dataset_name"),
+            "dataset_id": flow.get("dataset_id"),
+            "attempt_id": flow.get("attempt_id"),
+        }
+        if (
+            not hmac.compare_digest(str(flow.get("user_id", "")), str(user_id))
+            or flow.get("environment") != self.environment
+        ):
+            raise RadarOAuthStateError(
+                "RADAR OAuth state belongs to another user or environment.",
+                **details
+            )
+        if not hmac.compare_digest(
+            str(flow.get("session_binding_hash", "")),
+            self._hash(session_binding),
+        ):
+            raise RadarOAuthStateError(
+                "RADAR OAuth session binding is invalid.", **details
+            )
         if provider_error:
             raise RadarOAuthError(
-                "RADAR authorization was denied or cancelled.",
-                flow_consumed=True,
-                dataset_name=flow.dataset_name,
+                "RADAR authorization was denied or cancelled.", **details
             )
         if not code:
             raise RadarOAuthError(
-                "RADAR did not return an authorization code.",
-                flow_consumed=True,
-                dataset_name=flow.dataset_name,
+                "RADAR did not return an authorization code.", **details
             )
-        code_verifier = self._decrypt_optional(flow.code_verifier_encrypted)
         try:
-            token_data = self._exchange_code(code, code_verifier)
+            token_data = self._exchange_code(
+                code, str(flow.get("code_verifier") or "")
+            )
         except RadarOAuthError as error:
             error.flow_consumed = True
-            error.dataset_name = flow.dataset_name
+            error.dataset_name = flow.get("dataset_name")
+            error.dataset_id = flow.get("dataset_id")
+            error.attempt_id = flow.get("attempt_id")
             raise
-        self._save_token_response(user_id, token_data)
-        return flow.dataset_name
-
-    def connection_status(self, user_id, refresh_if_needed=True):
-        record = RadarOAuthToken.get_by_user_environment(
-            user_id, self.environment
+        self._save_token_response(
+            user_id=user_id,
+            dataset_id=flow["dataset_id"],
+            dataset_name=flow["dataset_name"],
+            session_binding=session_binding,
+            attempt_id=flow["attempt_id"],
+            token_data=token_data,
         )
-        if not record or record.requires_reauthentication:
-            return {"connected": False, "requires_reauthentication": bool(record)}
+        return {
+            "dataset_id": flow["dataset_id"],
+            "dataset_name": flow["dataset_name"],
+            "attempt_id": flow["attempt_id"],
+            "session_binding": session_binding,
+        }
+
+    def connection_status(
+        self, user_id, dataset_id, session_binding, attempt_id,
+        refresh_if_needed=False
+    ):
+        if not attempt_id or not session_binding:
+            return {"connected": False, "requires_reauthentication": False}
+        record = self._load_and_validate_attempt(
+            user_id, dataset_id, session_binding, attempt_id,
+            missing_ok=True,
+        )
+        if not record:
+            return {
+                "connected": False,
+                "requires_reauthentication": False,
+                "expired": True,
+            }
+        if record.get("requires_reauthentication"):
+            return {"connected": False, "requires_reauthentication": True}
         if refresh_if_needed:
             try:
-                self.get_valid_access_token(user_id)
+                self.get_valid_access_token(
+                    user_id, dataset_id, session_binding, attempt_id
+                )
             except RadarReauthenticationRequired:
                 return {"connected": False, "requires_reauthentication": True}
             except RadarOAuthTemporaryError:
@@ -241,40 +363,284 @@ class RadarOAuthService(object):
                 }
         return {"connected": True, "requires_reauthentication": False}
 
-    def token_provider(self, user_id):
-        return RadarUserTokenProvider(self, user_id)
-
-    def get_valid_access_token(self, user_id):
-        record = RadarOAuthToken.get_by_user_environment(
-            user_id, self.environment, for_update=True
+    def token_provider(
+        self, user_id, dataset_id, session_binding, attempt_id
+    ):
+        return RadarUserTokenProvider(
+            self, user_id, dataset_id, session_binding, attempt_id
         )
-        if not record or record.requires_reauthentication:
+
+    def claim_attempt(self, user_id, dataset_id, session_binding, attempt_id):
+        if not attempt_id:
             raise RadarReauthenticationRequired(
-                "Connect your RADAR4Ing account before publishing."
+                "Authorize this dataset transfer with RADAR4Ing before publishing."
             )
-        if record.expires_at > self.now() + datetime.timedelta(
-            seconds=self.refresh_margin
-        ):
-            return self._decrypt_required(record.access_token_encrypted)
-        return self._refresh(record)
+        try:
+            with self._attempt_lock(attempt_id):
+                self._load_and_validate_attempt(
+                    user_id, dataset_id, session_binding, attempt_id
+                )
+                claimed = self.redis.set(
+                    self._claim_key(attempt_id),
+                    secrets.token_urlsafe(24),
+                    nx=True,
+                    ex=self.active_attempt_ttl,
+                )
+                if not claimed:
+                    raise RadarOAuthAttemptClaimed(
+                        "This RADAR4Ing authorization is already being used."
+                    )
+                self.redis.expire(
+                    self._attempt_key(attempt_id), self.active_attempt_ttl
+                )
+        except RadarOAuthError:
+            raise
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
 
-    def disconnect(self, user_id):
-        record = RadarOAuthToken.get_by_user_environment(
-            user_id, self.environment, for_update=True
-        )
-        if record:
-            record.delete()
-        RadarOAuthState.delete_open_for_user(user_id, self.environment)
-        meta.Session.flush()
+    def finish_attempt(self, attempt_id):
+        if not attempt_id:
+            return
+        try:
+            with self._attempt_lock(attempt_id):
+                self.redis.delete(
+                    self._attempt_key(attempt_id), self._claim_key(attempt_id)
+                )
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary credentials could not be removed."
+            ) from error
 
-    def mark_reauthentication_required(self, user_id):
-        record = RadarOAuthToken.get_by_user_environment(
-            user_id, self.environment, for_update=True
+    def disconnect(
+        self, user_id, dataset_id, session_binding, attempt_id
+    ):
+        if not attempt_id:
+            return
+        try:
+            with self._attempt_lock(attempt_id):
+                self._load_and_validate_attempt(
+                    user_id, dataset_id, session_binding, attempt_id,
+                    missing_ok=True,
+                )
+                if self.redis.exists(self._claim_key(attempt_id)):
+                    raise RadarOAuthAttemptClaimed(
+                        "An active RADAR4Ing publication cannot be disconnected."
+                    )
+                self.redis.delete(self._attempt_key(attempt_id))
+        except RadarOAuthError:
+            raise
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
+
+    def get_valid_access_token(
+        self, user_id, dataset_id, session_binding, attempt_id,
+        require_claimed=False
+    ):
+        record = self._load_and_validate_attempt(
+            user_id, dataset_id, session_binding, attempt_id
         )
-        if record:
-            record.requires_reauthentication = True
-            record.updated_at = self.now()
-            record.save()
+        if require_claimed and not self._is_claimed(attempt_id):
+            raise RadarOAuthAttemptClaimed(
+                "This RADAR4Ing publication authorization has not been claimed."
+            )
+        if record.get("requires_reauthentication"):
+            raise RadarReauthenticationRequired(
+                "Your RADAR4Ing authorization has expired. Connect again."
+            )
+        if float(record["expires_at"]) > self._timestamp() + self.refresh_margin:
+            return str(record["access_token"])
+        return self._refresh(
+            user_id, dataset_id, session_binding, attempt_id
+        )
+
+    def mark_reauthentication_required(
+        self, user_id, dataset_id, session_binding, attempt_id
+    ):
+        try:
+            with self._attempt_lock(attempt_id):
+                record = self._load_and_validate_attempt(
+                    user_id, dataset_id, session_binding, attempt_id,
+                    missing_ok=True,
+                )
+                if record:
+                    record["requires_reauthentication"] = True
+                    self._save_attempt_preserving_ttl(attempt_id, record)
+        except RadarOAuthError:
+            raise
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
+
+    def _refresh(self, user_id, dataset_id, session_binding, attempt_id):
+        try:
+            with self._attempt_lock(attempt_id):
+                record = self._load_and_validate_attempt(
+                    user_id, dataset_id, session_binding, attempt_id
+                )
+                if float(record["expires_at"]) > (
+                    self._timestamp() + self.refresh_margin
+                ):
+                    return str(record["access_token"])
+                refresh_token = str(record.get("refresh_token") or "")
+                if not refresh_token:
+                    return self._require_reauthentication(
+                        attempt_id,
+                        record,
+                        "RADAR did not provide a refresh token. Connect again.",
+                    )
+                try:
+                    if self.refresh_mode == "radar_api":
+                        response = self.requests.post(
+                            self.refresh_url,
+                            json={
+                                "clientId": self.client_id,
+                                "clientSecret": self.client_secret,
+                                "refreshToken": refresh_token,
+                            },
+                            timeout=self.timeout,
+                        )
+                    else:
+                        response = self.requests.post(
+                            self.token_url,
+                            auth=(self.client_id, self.client_secret),
+                            data={
+                                "grant_type": "refresh_token",
+                                "refresh_token": refresh_token,
+                            },
+                            timeout=self.timeout,
+                        )
+                except requests.RequestException as error:
+                    raise RadarOAuthTemporaryError(
+                        "RADAR token refresh is currently unavailable."
+                    ) from error
+                if response.status_code in (400, 401, 403):
+                    return self._require_reauthentication(
+                        attempt_id,
+                        record,
+                        "Your RADAR4Ing authorization has expired. Connect again.",
+                    )
+                token_data = self._token_response(
+                    response, "RADAR token refresh failed."
+                )
+                record["access_token"] = token_data["access_token"]
+                record["refresh_token"] = (
+                    token_data.get("refresh_token") or refresh_token
+                )
+                record["expires_at"] = (
+                    self._timestamp() + self._expires_in(token_data)
+                )
+                record["requires_reauthentication"] = False
+                self._save_attempt_preserving_ttl(attempt_id, record)
+                return token_data["access_token"]
+        except RadarOAuthError:
+            raise
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
+
+    def _require_reauthentication(self, attempt_id, record, message):
+        record["requires_reauthentication"] = True
+        self._save_attempt_preserving_ttl(attempt_id, record)
+        raise RadarReauthenticationRequired(message)
+
+    def _save_token_response(
+        self, user_id, dataset_id, dataset_name, session_binding, attempt_id,
+        token_data
+    ):
+        record = {
+            "user_id": str(user_id),
+            "dataset_id": str(dataset_id),
+            "dataset_name": str(dataset_name)[:200],
+            "environment": self.environment,
+            "session_binding_hash": self._hash(session_binding),
+            "access_token": str(token_data["access_token"]),
+            "refresh_token": str(token_data.get("refresh_token") or ""),
+            "expires_at": self._timestamp() + self._expires_in(token_data),
+            "created_at": self._timestamp(),
+            "requires_reauthentication": False,
+        }
+        try:
+            self.redis.set(
+                self._attempt_key(attempt_id),
+                self._seal_json(record),
+                ex=self.attempt_ttl,
+            )
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
+
+    def _load_and_validate_attempt(
+        self, user_id, dataset_id, session_binding, attempt_id,
+        missing_ok=False
+    ):
+        if not attempt_id or not session_binding:
+            if missing_ok:
+                return None
+            raise RadarReauthenticationRequired(
+                "Authorize this dataset transfer with RADAR4Ing before publishing."
+            )
+        try:
+            value = self.redis.get(self._attempt_key(attempt_id))
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
+        if not value:
+            if missing_ok:
+                return None
+            raise RadarReauthenticationRequired(
+                "Your RADAR4Ing authorization has expired. Connect again."
+            )
+        record = self._open_json(value)
+        valid = (
+            hmac.compare_digest(str(record.get("user_id", "")), str(user_id))
+            and hmac.compare_digest(
+                str(record.get("dataset_id", "")), str(dataset_id)
+            )
+            and record.get("environment") == self.environment
+            and hmac.compare_digest(
+                str(record.get("session_binding_hash", "")),
+                self._hash(session_binding),
+            )
+        )
+        if not valid:
+            raise RadarReauthenticationRequired(
+                "This RADAR4Ing authorization does not belong to this dataset "
+                "and browser session."
+            )
+        return record
+
+    def _save_attempt_preserving_ttl(self, attempt_id, record):
+        ttl = self.redis.ttl(self._attempt_key(attempt_id))
+        if ttl is None or ttl <= 0:
+            raise RadarReauthenticationRequired(
+                "Your RADAR4Ing authorization has expired. Connect again."
+            )
+        self.redis.set(
+            self._attempt_key(attempt_id), self._seal_json(record), ex=ttl
+        )
+
+    def _is_claimed(self, attempt_id):
+        try:
+            return bool(self.redis.exists(self._claim_key(attempt_id)))
+        except RedisError as error:
+            raise RadarOAuthTemporaryError(
+                "RADAR4Ing temporary authentication storage is unavailable."
+            ) from error
+
+    def _attempt_lock(self, attempt_id):
+        return self.redis.lock(
+            self._lock_key(attempt_id),
+            timeout=self.LOCK_TIMEOUT_SECONDS,
+            blocking_timeout=self.timeout,
+        )
 
     def _exchange_code(self, code, code_verifier):
         form = {
@@ -296,80 +662,6 @@ class RadarOAuthService(object):
                 "RADAR token exchange is currently unavailable."
             ) from error
         return self._token_response(response, "RADAR token exchange failed.")
-
-    def _refresh(self, record):
-        refresh_token = self._decrypt_optional(record.refresh_token_encrypted)
-        if not refresh_token:
-            return self._require_reauthentication(
-                record, "RADAR did not provide a refresh token. Reconnect your account."
-            )
-        try:
-            if self.refresh_mode == "radar_api":
-                response = self.requests.post(
-                    self.refresh_url,
-                    json={
-                        "clientId": self.client_id,
-                        "clientSecret": self.client_secret,
-                        "refreshToken": refresh_token,
-                    },
-                    timeout=self.timeout,
-                )
-            else:
-                response = self.requests.post(
-                    self.token_url,
-                    auth=(self.client_id, self.client_secret),
-                    data={
-                        "grant_type": "refresh_token",
-                        "refresh_token": refresh_token,
-                    },
-                    timeout=self.timeout,
-                )
-        except requests.RequestException as error:
-            raise RadarOAuthTemporaryError(
-                "RADAR token refresh is currently unavailable."
-            ) from error
-        if response.status_code in (400, 401, 403):
-            return self._require_reauthentication(
-                record, "Your RADAR4Ing connection has expired. Reconnect your account."
-            )
-        token_data = self._token_response(response, "RADAR token refresh failed.")
-        if not token_data.get("refresh_token"):
-            token_data["refresh_token"] = refresh_token
-        self._apply_token_response(record, token_data)
-        record.save()
-        return token_data["access_token"]
-
-    def _require_reauthentication(self, record, message):
-        record.requires_reauthentication = True
-        record.updated_at = self.now()
-        record.save()
-        raise RadarReauthenticationRequired(message)
-
-    def _save_token_response(self, user_id, token_data):
-        record = RadarOAuthToken.get_by_user_environment(
-            user_id, self.environment, for_update=True
-        )
-        now = self.now()
-        if not record:
-            record = RadarOAuthToken(
-                ckan_user_id=user_id,
-                radar_environment=self.environment,
-                connected_at=now,
-            )
-        self._apply_token_response(record, token_data)
-        record.save()
-
-    def _apply_token_response(self, record, token_data):
-        expires_in = self._expires_in(token_data)
-        record.access_token_encrypted = self._encrypt_required(
-            token_data["access_token"]
-        )
-        record.refresh_token_encrypted = self._encrypt_optional(
-            token_data.get("refresh_token")
-        )
-        record.expires_at = self.now() + datetime.timedelta(seconds=expires_in)
-        record.updated_at = self.now()
-        record.requires_reauthentication = False
 
     def _token_response(self, response, failure_message):
         if not 200 <= response.status_code < 300:
@@ -412,28 +704,63 @@ class RadarOAuthService(object):
             )
         return expires_in
 
-    def _encrypt_required(self, value):
-        if not value:
-            raise RadarOAuthError("RADAR returned an empty token.")
-        return self.fernet.encrypt(str(value).encode("utf-8")).decode("ascii")
-
-    def _encrypt_optional(self, value):
-        return self._encrypt_required(value) if value else None
-
-    def _decrypt_required(self, value):
-        if not value:
-            raise RadarReauthenticationRequired(
-                "Your RADAR4Ing connection is incomplete. Reconnect your account."
+    def _create_redis_client(self):
+        redis_url = self._setting("ckan.redis.url")
+        if not redis_url:
+            raise RadarOAuthConfigError(
+                "CKAN Redis configuration is required for RADAR OAuth."
             )
         try:
-            return self.fernet.decrypt(value.encode("ascii")).decode("utf-8")
-        except (InvalidToken, ValueError, UnicodeError) as error:
-            raise RadarReauthenticationRequired(
-                "Your RADAR4Ing connection cannot be read. Reconnect your account."
+            return redis.Redis.from_url(str(redis_url), decode_responses=False)
+        except (RedisError, ValueError) as error:
+            raise RadarOAuthConfigError(
+                "CKAN Redis configuration is invalid for RADAR OAuth."
             ) from error
 
-    def _decrypt_optional(self, value):
-        return self._decrypt_required(value) if value else ""
+    def _seal_json(self, value):
+        payload = json.dumps(
+            value, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return self.fernet.encrypt(payload)
+
+    def _open_json(self, value, state_error=False):
+        try:
+            if isinstance(value, str):
+                value = value.encode("ascii")
+            payload = self.fernet.decrypt(value)
+            result = json.loads(payload.decode("utf-8"))
+            if not isinstance(result, dict):
+                raise ValueError("invalid payload")
+            return result
+        except (InvalidToken, ValueError, TypeError, UnicodeError) as error:
+            error_type = (
+                RadarOAuthStateError
+                if state_error
+                else RadarReauthenticationRequired
+            )
+            raise error_type(
+                "RADAR4Ing temporary authorization data is invalid. Connect again."
+            ) from error
+
+    def _state_key(self, state_id):
+        return "{}:{}:state:{}".format(
+            self.KEY_PREFIX, self.environment, state_id
+        )
+
+    def _attempt_key(self, attempt_id):
+        return "{}:{}:attempt:{}".format(
+            self.KEY_PREFIX, self.environment, attempt_id
+        )
+
+    def _claim_key(self, attempt_id):
+        return "{}:{}:claim:{}".format(
+            self.KEY_PREFIX, self.environment, attempt_id
+        )
+
+    def _lock_key(self, attempt_id):
+        return "{}:{}:lock:{}".format(
+            self.KEY_PREFIX, self.environment, attempt_id
+        )
 
     def _validate_environment_hosts(self):
         endpoint_hosts = {
@@ -473,7 +800,9 @@ class RadarOAuthService(object):
         value = self._setting(key)
         if value is not None and str(value).strip():
             return str(value).strip()
-        raise RadarOAuthConfigError("Missing RADAR OAuth configuration: {}".format(key))
+        raise RadarOAuthConfigError(
+            "Missing RADAR OAuth configuration: {}".format(key)
+        )
 
     def _setting(self, key, default=None):
         value = self.config.get(key)
@@ -501,9 +830,12 @@ class RadarOAuthService(object):
             raise RadarOAuthConfigError("{} must be positive.".format(key))
         return value
 
+    def _timestamp(self):
+        return self.now().replace(tzinfo=None).timestamp()
+
     @staticmethod
     def _hash(value):
-        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+        return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
 
     @staticmethod
     def _url_with_query(url, parameters):

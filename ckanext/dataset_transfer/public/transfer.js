@@ -9,6 +9,13 @@ const radarIdentifierDebounceDelay = 500;
 const radarIdentifierRequestTimeout = 6000;
 
 $(document).ready(function(){
+    $('#dataset_transfer_cancel_btn').on('click', function(event){
+        if($('#publish_destination_selection').data('radar-connected') === true &&
+                $('#radar_cancel_disconnect_form').length){
+            event.preventDefault();
+            $('#radar_cancel_disconnect_form').trigger('submit');
+        }
+    });
     
     update_publish_target_fields();
 

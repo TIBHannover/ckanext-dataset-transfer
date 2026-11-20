@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import re
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import requests
@@ -1585,8 +1585,9 @@ def test_remote_dataset_is_reconciled_when_initial_local_save_failed(
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
+@pytest.mark.parametrize("destination_failure", [False, True])
 def test_publish_dataset_to_radar_uses_current_users_oauth_token(
-    app, monkeypatch, tmp_path, radar_oauth_config
+    app, monkeypatch, tmp_path, radar_oauth_config, destination_failure
 ):
     import ckan.plugins.toolkit as toolkit
     import ckan.tests.factories as factories
@@ -1633,11 +1634,12 @@ def test_publish_dataset_to_radar_uses_current_users_oauth_token(
         monkeypatch.setitem(toolkit.config, key, value)
     from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
 
-    RadarOAuthService()._save_token_response(user["id"], {
-        "access_token": "radar-access-token",
-        "refresh_token": "radar-refresh-token",
-        "expires_in": 3600,
-    })
+    oauth_service = RadarOAuthService()
+    existing_keys = list(oauth_service.redis.scan_iter(
+        RadarOAuthService.KEY_PREFIX + ":*"
+    ))
+    if existing_keys:
+        oauth_service.redis.delete(*existing_keys)
     monkeypatch.setattr(base.Helper, "check_access_edit_package", lambda package_id: True)
     monkeypatch.setattr(
         base.toolkit,
@@ -1653,6 +1655,8 @@ def test_publish_dataset_to_radar_uses_current_users_oauth_token(
         calls.append(("POST", url))
         if url.endswith("/api/workspaces/workspace-id/datasets"):
             assert headers["Authorization"] == "Bearer radar-access-token"
+            if destination_failure:
+                return FakeResponse(503, {"message": "temporarily unavailable"})
             return FakeResponse(200, {"id": "radar-dataset-id"})
         if url.endswith("/api/datasets/radar-dataset-id/metadata"):
             assert b"Local RADAR Dataset" in files["metadataFile"][1]
@@ -1685,9 +1689,40 @@ def test_publish_dataset_to_radar_uses_current_users_oauth_token(
         dfg_award_number="511148852",
     )
 
-    response = app.post(
+    from ckanext.dataset_transfer.services import radar_oauth
+
+    client = app.test_client()
+    login = client.get(
+        "/dataset_transfer/radar/login?dataset_name={}".format(dataset["name"]),
+        headers=_auth_headers(user),
+        status=302,
+        follow_redirects=False,
+    )
+    state = parse_qs(urlparse(login.location).query)["state"][0]
+    monkeypatch.setattr(
+        radar_oauth.requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(200, {
+            "access_token": "radar-access-token",
+            "refresh_token": "radar-refresh-token",
+            "expires_in": 3600,
+        }),
+    )
+    client.get(
+        "/dataset_transfer/radar/callback?code=code&state={}".format(state),
+        headers=_auth_headers(user),
+        status=302,
+        follow_redirects=False,
+    )
+    attempt_keys = list(oauth_service.redis.scan_iter(
+        RadarOAuthService.KEY_PREFIX + ":test:attempt:*"
+    ))
+    assert len(attempt_keys) == 1
+    monkeypatch.setattr(base.requests, "post", fake_post)
+    monkeypatch.setattr(base.requests, "get", fake_get)
+    response = client.post(
         "/dataset_transfer/publish",
-        params={
+        data={
             "package_id": dataset["id"],
             "publish_target": "radar",
             "radar_metadata": json.dumps(reviewed_metadata),
@@ -1697,9 +1732,15 @@ def test_publish_dataset_to_radar_uses_current_users_oauth_token(
         headers=_auth_headers(user),
     )
 
+    assert not oauth_service.redis.exists(attempt_keys[0])
+    assert not any("data.uni-hannover.de" in url for _, url in calls)
+    if destination_failure:
+        assert response.status_code == 502, response.json
+        assert PublishedDataset.get_by_dataset(dataset["id"]) is False
+        return
+
     assert response.status_code == 200, response.json
     assert response.json["published_dataset_id"] == "radar-dataset-id"
-    assert not any("data.uni-hannover.de" in url for _, url in calls)
     publication = PublishedDataset.get_by_dataset(dataset["id"])
     assert PublishedDataset.decode_target_id(publication.published_dataset_id) == (
         "radar", "radar-dataset-id"

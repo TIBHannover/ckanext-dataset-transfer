@@ -73,6 +73,8 @@ def radar_oauth_config(monkeypatch):
             Fernet.generate_key().decode("ascii")
         ),
         "ckanext.dataset_transfer.radar.oauth_state_ttl": "600",
+        "ckanext.dataset_transfer.radar.oauth_attempt_ttl": "3600",
+        "ckanext.dataset_transfer.radar.oauth_active_attempt_ttl": "7200",
         "ckanext.dataset_transfer.radar.oauth_timeout": "5",
         "ckanext.dataset_transfer.radar.oauth_refresh_margin": "300",
         "ckanext.dataset_transfer.radar.client_id": "oauth-client",
@@ -86,6 +88,56 @@ def radar_oauth_config(monkeypatch):
     for key, value in values.items():
         monkeypatch.setitem(toolkit.config, key, value)
     return values
+
+
+@pytest.fixture
+def radar_redis(radar_oauth_config):
+    import os
+    import redis
+    import ckan.plugins.toolkit as toolkit
+    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
+
+    redis_url = toolkit.config.get("ckan.redis.url") or os.environ.get(
+        "CKAN_REDIS_URL"
+    )
+    client = redis.Redis.from_url(redis_url, decode_responses=False)
+    keys = list(client.scan_iter(RadarOAuthService.KEY_PREFIX + ":*"))
+    if keys:
+        client.delete(*keys)
+    yield client
+    keys = list(client.scan_iter(RadarOAuthService.KEY_PREFIX + ":*"))
+    if keys:
+        client.delete(*keys)
+
+
+def _service(radar_redis, responses=None, **kwargs):
+    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
+
+    return RadarOAuthService(
+        redis_client=radar_redis,
+        request_session=FakeOAuthSession(responses or []),
+        **kwargs
+    )
+
+
+def _store_attempt(
+    service, user="user-a", dataset="dataset-a", binding="binding-a",
+    attempt="attempt-a", access="access-a", refresh="refresh-a",
+    expires_in=3600
+):
+    service._save_token_response(
+        user_id=user,
+        dataset_id=dataset,
+        dataset_name=dataset,
+        session_binding=binding,
+        attempt_id=attempt,
+        token_data={
+            "access_token": access,
+            "refresh_token": refresh,
+            "expires_in": expires_in,
+        },
+    )
+    return attempt
 
 
 def _auth_headers(user):
@@ -105,30 +157,30 @@ def _begin_oauth(app, user, dataset):
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_authenticated_user_starts_authorization_with_server_side_state(
-    app, radar_oauth_config
+def test_login_stores_encrypted_state_in_redis(
+    app, radar_oauth_config, radar_redis
 ):
     import ckan.tests.factories as factories
-    from ckan.model import meta
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthState
+    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
 
     user = factories.SysadminWithToken()
     dataset = factories.Dataset()
     response, query, _ = _begin_oauth(app, user, dataset)
-
-    assert response.location.startswith(radar_oauth_config[
-        "ckanext.dataset_transfer.radar.oauth_authorize_url"
-    ])
+    assert response.location.startswith(
+        radar_oauth_config["ckanext.dataset_transfer.radar.oauth_authorize_url"]
+    )
     assert query["client_id"] == ["oauth-client"]
     assert query["response_type"] == ["code"]
-    assert query["redirect_uri"] == [radar_oauth_config[
-        "ckanext.dataset_transfer.radar.oauth_callback_url"
-    ]]
-    assert len(query["state"][0]) >= 40
-    flow = meta.Session.query(RadarOAuthState).one()
-    assert flow.ckan_user_id == user["id"]
-    assert flow.dataset_name == dataset["name"]
-    assert flow.state_hash != query["state"][0]
+    assert query["redirect_uri"] == [
+        radar_oauth_config["ckanext.dataset_transfer.radar.oauth_callback_url"]
+    ]
+    service = _service(radar_redis)
+    state_key = service._state_key(service._hash(query["state"][0]))
+    stored = radar_redis.get(state_key)
+    assert stored
+    assert user["id"].encode("utf-8") not in stored
+    assert dataset["id"].encode("utf-8") not in stored
+    assert 0 < radar_redis.ttl(state_key) <= 600
 
 
 def test_unauthenticated_user_cannot_start_oauth(app, radar_oauth_config):
@@ -139,411 +191,275 @@ def test_unauthenticated_user_cannot_start_oauth(app, radar_oauth_config):
     assert response.status_code == 401
 
 
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_pkce_s256_is_opt_in(app, monkeypatch, radar_oauth_config):
+def test_state_is_atomic_single_use_and_tokens_are_temporary(
+    radar_oauth_config, radar_redis
+):
+    service = _service(radar_redis, [FakeResponse(200, {
+        "access_token": "access-secret",
+        "refresh_token": "refresh-secret",
+        "expires_in": 3600,
+    })])
+    url, binding, _ = service.authorization_url(
+        "user-a", "dataset-a-id", "dataset-a"
+    )
+    state = parse_qs(urlparse(url).query)["state"][0]
+    result = service.complete_authorization(
+        "user-a", state, binding, code="one-time-code"
+    )
+    attempt_key = service._attempt_key(result["attempt_id"])
+    sealed = radar_redis.get(attempt_key)
+    assert sealed
+    assert b"access-secret" not in sealed
+    assert b"refresh-secret" not in sealed
+    assert 0 < radar_redis.ttl(attempt_key) <= 3600
+    with pytest.raises(Exception, match="already used"):
+        service.complete_authorization(
+            "user-a", state, binding, code="reused-code"
+        )
+
+
+@pytest.mark.parametrize(
+    "wrong_user,wrong_binding",
+    [("user-b", "binding-a"), ("user-a", "wrong-browser")],
+)
+def test_state_rejects_wrong_user_or_browser(
+    radar_oauth_config, radar_redis, wrong_user, wrong_binding
+):
+    service = _service(radar_redis)
+    url, binding, _ = service.authorization_url(
+        "user-a", "dataset-a", "dataset-a", session_binding="binding-a"
+    )
+    state = parse_qs(urlparse(url).query)["state"][0]
+    with pytest.raises(Exception, match="another user|session binding"):
+        service.complete_authorization(
+            wrong_user, state, wrong_binding, code="code"
+        )
+
+
+def test_expired_or_invalid_state_is_rejected(radar_oauth_config, radar_redis):
+    service = _service(radar_redis)
+    url, binding, state_id = service.authorization_url(
+        "user-a", "dataset-a", "dataset-a"
+    )
+    radar_redis.delete(service._state_key(state_id))
+    state = parse_qs(urlparse(url).query)["state"][0]
+    with pytest.raises(Exception, match="invalid, expired"):
+        service.complete_authorization("user-a", state, binding, code="code")
+    with pytest.raises(Exception, match="invalid, expired"):
+        service.complete_authorization(
+            "user-a", "invalid-state", binding, code="code"
+        )
+
+
+def test_state_is_environment_specific(radar_oauth_config, radar_redis):
+    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
+
+    test_service = _service(radar_redis)
+    url, binding, _ = test_service.authorization_url(
+        "user-a", "dataset-a", "dataset-a"
+    )
+    other_config = dict(radar_oauth_config)
+    other_config["ckanext.dataset_transfer.radar.oauth_environment"] = "custom"
+    other_service = RadarOAuthService(
+        config=other_config, redis_client=radar_redis,
+        request_session=FakeOAuthSession([]),
+    )
+    state = parse_qs(urlparse(url).query)["state"][0]
+    with pytest.raises(Exception, match="invalid, expired"):
+        other_service.complete_authorization(
+            "user-a", state, binding, code="code"
+        )
+
+
+def test_pkce_s256_is_preserved(radar_oauth_config, radar_redis, monkeypatch):
     import ckan.plugins.toolkit as toolkit
-    import ckan.tests.factories as factories
 
     monkeypatch.setitem(
         toolkit.config,
         "ckanext.dataset_transfer.radar.oauth_pkce_enabled",
         "true",
     )
-    _, query, _ = _begin_oauth(
-        app, factories.SysadminWithToken(), factories.Dataset()
-    )
+    service = _service(radar_redis)
+    url, _, _ = service.authorization_url("user", "dataset", "dataset")
+    query = parse_qs(urlparse(url).query)
     assert query["code_challenge_method"] == ["S256"]
     assert len(query["code_challenge"][0]) == 43
 
 
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_callback_exchanges_code_and_returns_to_dataset(
-    app, monkeypatch, radar_oauth_config
+def test_dataset_user_and_browser_binding_prevent_reuse(
+    radar_oauth_config, radar_redis
 ):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthToken
-    from ckanext.dataset_transfer.services import radar_oauth
-
-    user = factories.SysadminWithToken()
-    dataset = factories.Dataset()
-    _, query, client = _begin_oauth(app, user, dataset)
-    calls = []
-
-    def exchange(url, **kwargs):
-        calls.append((url, kwargs))
-        return FakeResponse(200, {
-            "access_token": "oliver-access-token",
-            "refresh_token": "oliver-refresh-token",
-            "expires_in": 3600,
-        })
-
-    monkeypatch.setattr(radar_oauth.requests, "post", exchange)
-    response = client.get(
-        "/dataset_transfer/radar/callback?code=one-time-code&state={}".format(
-            query["state"][0]
-        ),
-        headers=_auth_headers(user),
-        status=302,
-        follow_redirects=False,
+    from ckanext.dataset_transfer.services.radar_oauth import (
+        RadarReauthenticationRequired,
     )
 
-    assert "/dataset_transfer/publish_page/{}".format(dataset["name"]) in response.location
-    assert "publish_target=radar" in response.location
-    assert calls[0][0] == radar_oauth_config[
-        "ckanext.dataset_transfer.radar.oauth_token_url"
-    ]
-    assert calls[0][1]["auth"] == ("oauth-client", "oauth-secret")
-    assert calls[0][1]["data"]["redirect_uri"] == radar_oauth_config[
-        "ckanext.dataset_transfer.radar.oauth_callback_url"
-    ]
-    record = RadarOAuthToken.get_by_user_environment(user["id"], "test")
-    assert record.access_token_encrypted != "oliver-access-token"
-    assert record.refresh_token_encrypted != "oliver-refresh-token"
+    service = _service(radar_redis)
+    _store_attempt(service)
+    assert service.get_valid_access_token(
+        "user-a", "dataset-a", "binding-a", "attempt-a"
+    ) == "access-a"
+    for user, dataset, binding in (
+        ("user-a", "dataset-b", "binding-a"),
+        ("user-b", "dataset-a", "binding-a"),
+        ("user-a", "dataset-a", "binding-b"),
+    ):
+        with pytest.raises(RadarReauthenticationRequired):
+            service.get_valid_access_token(
+                user, dataset, binding, "attempt-a"
+            )
 
 
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_callback_rejects_invalid_state(app, radar_oauth_config):
-    import ckan.tests.factories as factories
-
-    user = factories.SysadminWithToken()
-    response = app.get(
-        "/dataset_transfer/radar/callback?code=code&state=invalid",
-        headers=_auth_headers(user),
-        expect_errors=True,
+def test_two_dataset_tabs_have_isolated_attempts(radar_oauth_config, radar_redis):
+    service = _service(radar_redis)
+    _store_attempt(
+        service, dataset="dataset-a", binding="tab-a", attempt="attempt-a",
+        access="token-a"
     )
-    assert response.status_code == 400
+    _store_attempt(
+        service, dataset="dataset-b", binding="tab-b", attempt="attempt-b",
+        access="token-b"
+    )
+    assert service.get_valid_access_token(
+        "user-a", "dataset-a", "tab-a", "attempt-a"
+    ) == "token-a"
+    assert service.get_valid_access_token(
+        "user-a", "dataset-b", "tab-b", "attempt-b"
+    ) == "token-b"
+    service.disconnect("user-a", "dataset-a", "tab-a", "attempt-a")
+    assert service.connection_status(
+        "user-a", "dataset-a", "tab-a", "attempt-a"
+    )["connected"] is False
+    assert service.connection_status(
+        "user-a", "dataset-b", "tab-b", "attempt-b"
+    )["connected"] is True
 
 
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_callback_state_cannot_be_used_by_another_ckan_user(
-    app, radar_oauth_config
+def test_expired_token_refreshes_and_rotates_without_extending_attempt_ttl(
+    radar_oauth_config, radar_redis
 ):
-    import ckan.tests.factories as factories
-
-    owner = factories.SysadminWithToken()
-    attacker = factories.SysadminWithToken()
-    dataset = factories.Dataset()
-    _, query, client = _begin_oauth(app, owner, dataset)
-    response = client.get(
-        "/dataset_transfer/radar/callback?code=code&state={}".format(
-            query["state"][0]
-        ),
-        headers=_auth_headers(attacker),
-        expect_errors=True,
-    )
-    assert response.status_code == 400
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_callback_rejects_expired_state(app, radar_oauth_config):
-    import ckan.tests.factories as factories
-    from ckan.model import meta
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthState
-
-    user = factories.SysadminWithToken()
-    dataset = factories.Dataset()
-    _, query, client = _begin_oauth(app, user, dataset)
-    flow = meta.Session.query(RadarOAuthState).one()
-    flow.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
-    flow.save()
-    response = client.get(
-        "/dataset_transfer/radar/callback?code=code&state={}".format(
-            query["state"][0]
-        ),
-        headers=_auth_headers(user),
-        expect_errors=True,
-    )
-    assert response.status_code == 400
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-@pytest.mark.parametrize("callback_query", ["", "error=access_denied"])
-def test_callback_handles_missing_code_and_provider_denial(
-    app, radar_oauth_config, callback_query
-):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthToken
-
-    user = factories.SysadminWithToken()
-    dataset = factories.Dataset()
-    _, query, client = _begin_oauth(app, user, dataset)
-    suffix = "&{}".format(callback_query) if callback_query else ""
-    response = client.get(
-        "/dataset_transfer/radar/callback?state={}{}".format(
-            query["state"][0], suffix
-        ),
-        headers=_auth_headers(user),
-        status=302,
-        follow_redirects=False,
-    )
-    assert dataset["name"] in response.location
-    assert not RadarOAuthToken.get_by_user_environment(user["id"], "test")
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_token_exchange_failure_consumes_state_without_exposing_tokens(
-    app, monkeypatch, radar_oauth_config
-):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.services import radar_oauth
-
-    user = factories.SysadminWithToken()
-    dataset = factories.Dataset()
-    _, query, client = _begin_oauth(app, user, dataset)
-    monkeypatch.setattr(
-        radar_oauth.requests,
-        "post",
-        lambda *args, **kwargs: FakeResponse(401, {"access_token": "must-not-leak"}),
-    )
-    response = client.get(
-        "/dataset_transfer/radar/callback?code=sensitive-code&state={}".format(
-            query["state"][0]
-        ),
-        headers=_auth_headers(user),
-        status=302,
-        follow_redirects=False,
-    )
-    response_text = response.get_data(as_text=True)
-    assert "must-not-leak" not in response_text
-    assert "sensitive-code" not in response_text
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_oauth_return_destination_cannot_be_overridden(
-    app, monkeypatch, radar_oauth_config
-):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.services import radar_oauth
-
-    user = factories.SysadminWithToken()
-    dataset = factories.Dataset()
-    client = app.test_client()
-    response = client.get(
-        "/dataset_transfer/radar/login?dataset_name={}&next=https://evil.example".format(
-            dataset["name"]
-        ),
-        headers=_auth_headers(user),
-        status=302,
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(response.location).query)["state"][0]
-    monkeypatch.setattr(
-        radar_oauth.requests,
-        "post",
-        lambda *args, **kwargs: FakeResponse(200, {
-            "access_token": "access", "refresh_token": "refresh", "expires_in": 3600
-        }),
-    )
-    callback = client.get(
-        "/dataset_transfer/radar/callback?code=code&state={}".format(state),
-        headers=_auth_headers(user),
-        status=302,
-        follow_redirects=False,
-    )
-    assert "evil.example" not in callback.location
-    assert dataset["name"] in callback.location
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_tokens_are_isolated_by_ckan_user_and_disconnect_is_scoped(
-    radar_oauth_config,
-):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
-
-    oliver = factories.User()
-    second_user = factories.User()
-    service = RadarOAuthService()
-    service._save_token_response(oliver["id"], {
-        "access_token": "oliver-token", "refresh_token": "oliver-refresh", "expires_in": 3600
-    })
-    service._save_token_response(second_user["id"], {
-        "access_token": "second-token", "refresh_token": "second-refresh", "expires_in": 3600
-    })
-    assert service.get_valid_access_token(oliver["id"]) == "oliver-token"
-    assert service.get_valid_access_token(second_user["id"]) == "second-token"
-    service.disconnect(oliver["id"])
-    assert service.connection_status(oliver["id"], False)["connected"] is False
-    assert service.get_valid_access_token(second_user["id"]) == "second-token"
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_valid_token_does_not_refresh(radar_oauth_config):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
-
-    user = factories.User()
-    fake_http = FakeOAuthSession([])
-    service = RadarOAuthService(request_session=fake_http)
-    service._save_token_response(user["id"], {
-        "access_token": "valid-token", "refresh_token": "refresh", "expires_in": 3600
-    })
-    assert service.get_valid_access_token(user["id"]) == "valid-token"
-    assert fake_http.calls == []
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_expired_token_refreshes_and_rotates_refresh_token(radar_oauth_config):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthToken
-    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
-
-    user = factories.User()
-    fake_http = FakeOAuthSession([FakeResponse(200, {
+    service = _service(radar_redis, [FakeResponse(200, {
         "access_token": "new-access",
         "refresh_token": "rotated-refresh",
         "expires_in": 7200,
     })])
-    service = RadarOAuthService(request_session=fake_http)
-    service._save_token_response(user["id"], {
-        "access_token": "old-access", "refresh_token": "old-refresh", "expires_in": 1
-    })
-    record = RadarOAuthToken.get_by_user_environment(user["id"], "test")
-    record.expires_at = datetime.datetime.utcnow() - datetime.timedelta(seconds=1)
-    record.save()
-    assert service.get_valid_access_token(user["id"]) == "new-access"
-    assert fake_http.calls[0][1]["json"]["refreshToken"] == "old-refresh"
-    assert service._decrypt_required(record.refresh_token_encrypted) == "rotated-refresh"
-    assert service.get_valid_access_token(user["id"]) == "new-access"
-    assert len(fake_http.calls) == 1
+    _store_attempt(service, expires_in=1)
+    key = service._attempt_key("attempt-a")
+    record = service._open_json(radar_redis.get(key))
+    record["expires_at"] = service._timestamp() - 1
+    radar_redis.set(key, service._seal_json(record), ex=1200)
+    ttl_before = radar_redis.ttl(key)
+    assert service.get_valid_access_token(
+        "user-a", "dataset-a", "binding-a", "attempt-a"
+    ) == "new-access"
+    updated = service._open_json(radar_redis.get(key))
+    assert updated["refresh_token"] == "rotated-refresh"
+    assert radar_redis.ttl(key) <= ttl_before
 
 
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_refresh_without_rotation_preserves_existing_refresh_token(
-    radar_oauth_config,
+def test_refresh_without_rotation_preserves_refresh_token(
+    radar_oauth_config, radar_redis
 ):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthToken
-    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
-
-    user = factories.User()
-    service = RadarOAuthService(request_session=FakeOAuthSession([
-        FakeResponse(200, {"access_token": "new-access", "expires_in": 3600})
-    ]))
-    service._save_token_response(user["id"], {
-        "access_token": "old", "refresh_token": "keep-me", "expires_in": 1
-    })
-    record = RadarOAuthToken.get_by_user_environment(user["id"], "test")
-    record.expires_at = datetime.datetime.utcnow() - datetime.timedelta(seconds=1)
-    assert service.get_valid_access_token(user["id"]) == "new-access"
-    assert service._decrypt_required(record.refresh_token_encrypted) == "keep-me"
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_rejected_refresh_requires_reauthentication(radar_oauth_config):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthToken
-    from ckanext.dataset_transfer.services.radar_oauth import (
-        RadarOAuthService,
-        RadarReauthenticationRequired,
+    service = _service(radar_redis, [FakeResponse(200, {
+        "access_token": "new-access", "expires_in": 3600
+    })])
+    _store_attempt(service, refresh="keep-me", expires_in=1)
+    key = service._attempt_key("attempt-a")
+    record = service._open_json(radar_redis.get(key))
+    record["expires_at"] = service._timestamp() - 1
+    radar_redis.set(key, service._seal_json(record), ex=1200)
+    service.get_valid_access_token(
+        "user-a", "dataset-a", "binding-a", "attempt-a"
     )
-
-    user = factories.User()
-    service = RadarOAuthService(
-        request_session=FakeOAuthSession([FakeResponse(401, {})])
-    )
-    service._save_token_response(user["id"], {
-        "access_token": "old", "refresh_token": "revoked", "expires_in": 1
-    })
-    record = RadarOAuthToken.get_by_user_environment(user["id"], "test")
-    record.expires_at = datetime.datetime.utcnow() - datetime.timedelta(seconds=1)
-    with pytest.raises(RadarReauthenticationRequired):
-        service.get_valid_access_token(user["id"])
-    assert record.requires_reauthentication is True
+    assert service._open_json(radar_redis.get(key))["refresh_token"] == "keep-me"
 
 
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-@pytest.mark.parametrize("failure", [FakeResponse(429, {}), "timeout"])
-def test_temporary_refresh_failure_does_not_revoke_connection(
-    radar_oauth_config, failure
+@pytest.mark.parametrize("failure", [FakeResponse(401, {}), FakeResponse(429, {})])
+def test_refresh_failure_is_handled_safely(
+    radar_oauth_config, radar_redis, failure
 ):
-    import requests
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthToken
     from ckanext.dataset_transfer.services.radar_oauth import (
-        RadarOAuthService,
         RadarOAuthTemporaryError,
-    )
-
-    user = factories.User()
-    failure = requests.Timeout("timeout") if failure == "timeout" else failure
-    service = RadarOAuthService(request_session=FakeOAuthSession([failure]))
-    service._save_token_response(user["id"], {
-        "access_token": "old", "refresh_token": "refresh", "expires_in": 1
-    })
-    record = RadarOAuthToken.get_by_user_environment(user["id"], "test")
-    record.expires_at = datetime.datetime.utcnow() - datetime.timedelta(seconds=1)
-    with pytest.raises(RadarOAuthTemporaryError):
-        service.get_valid_access_token(user["id"])
-    assert record.requires_reauthentication is False
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_refresh_acquires_database_row_lock(monkeypatch, radar_oauth_config):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.models.radar_oauth import RadarOAuthToken
-    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
-
-    user = factories.User()
-    service = RadarOAuthService(request_session=FakeOAuthSession([
-        FakeResponse(200, {
-            "access_token": "new", "refresh_token": "new-refresh", "expires_in": 3600
-        })
-    ]))
-    service._save_token_response(user["id"], {
-        "access_token": "old", "refresh_token": "old-refresh", "expires_in": 1
-    })
-    record = RadarOAuthToken.get_by_user_environment(user["id"], "test")
-    record.expires_at = datetime.datetime.utcnow() - datetime.timedelta(seconds=1)
-    original = RadarOAuthToken.get_by_user_environment.__func__
-    lock_requests = []
-
-    def get_record(cls, user_id, environment, autoflush=True, for_update=False):
-        lock_requests.append(for_update)
-        return original(cls, user_id, environment, autoflush, for_update)
-
-    monkeypatch.setattr(
-        RadarOAuthToken, "get_by_user_environment", classmethod(get_record)
-    )
-    assert service.get_valid_access_token(user["id"]) == "new"
-    assert lock_requests[0] is True
-
-
-@pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_missing_connection_requires_authentication(radar_oauth_config):
-    import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.services.radar_oauth import (
-        RadarOAuthService,
         RadarReauthenticationRequired,
     )
 
-    with pytest.raises(RadarReauthenticationRequired):
-        RadarOAuthService().get_valid_access_token(factories.User()["id"])
+    service = _service(radar_redis, [failure])
+    _store_attempt(service, expires_in=1)
+    key = service._attempt_key("attempt-a")
+    record = service._open_json(radar_redis.get(key))
+    record["expires_at"] = service._timestamp() - 1
+    radar_redis.set(key, service._seal_json(record), ex=1200)
+    error = (
+        RadarReauthenticationRequired
+        if failure.status_code == 401
+        else RadarOAuthTemporaryError
+    )
+    with pytest.raises(error):
+        service.get_valid_access_token(
+            "user-a", "dataset-a", "binding-a", "attempt-a"
+        )
 
 
-def test_environment_mismatch_is_rejected(radar_oauth_config):
-    import ckan.plugins.toolkit as toolkit
+def test_attempt_claim_is_atomic_and_cleanup_is_terminal(
+    radar_oauth_config, radar_redis
+):
     from ckanext.dataset_transfer.services.radar_oauth import (
-        RadarOAuthConfigError,
-        RadarOAuthService,
+        RadarOAuthAttemptClaimed,
+        RadarReauthenticationRequired,
     )
 
-    config = dict(toolkit.config)
-    config.update(radar_oauth_config)
-    config["ckanext.dataset_transfer.radar.context_url"] = (
-        "https://www.radar-service.eu/radar"
+    service = _service(radar_redis)
+    _store_attempt(service)
+    service.claim_attempt("user-a", "dataset-a", "binding-a", "attempt-a")
+    with pytest.raises(RadarOAuthAttemptClaimed):
+        service.claim_attempt("user-a", "dataset-a", "binding-a", "attempt-a")
+    assert radar_redis.ttl(service._attempt_key("attempt-a")) <= 7200
+    provider = service.token_provider(
+        "user-a", "dataset-a", "binding-a", "attempt-a"
     )
-    with pytest.raises(RadarOAuthConfigError):
-        RadarOAuthService(config=config)
+    assert provider.get_valid_access_token() == "access-a"
+    service.finish_attempt("attempt-a")
+    with pytest.raises(RadarReauthenticationRequired):
+        service.get_valid_access_token(
+            "user-a", "dataset-a", "binding-a", "attempt-a"
+        )
 
 
-def test_radar_publisher_has_no_shared_credential_fallback(radar_oauth_config):
+def test_disconnect_cannot_interrupt_claimed_publication(
+    radar_oauth_config, radar_redis
+):
+    from ckanext.dataset_transfer.services.radar_oauth import (
+        RadarOAuthAttemptClaimed,
+    )
+
+    service = _service(radar_redis)
+    _store_attempt(service)
+    service.claim_attempt("user-a", "dataset-a", "binding-a", "attempt-a")
+    with pytest.raises(RadarOAuthAttemptClaimed):
+        service.disconnect("user-a", "dataset-a", "binding-a", "attempt-a")
+    assert radar_redis.exists(service._attempt_key("attempt-a"))
+
+
+def test_no_shared_credential_fallback(radar_oauth_config):
     from ckanext.dataset_transfer.services.radar import RadarConfigError, RadarPublisher
 
     config = dict(radar_oauth_config)
     config["ckanext.dataset_transfer.radar.access_token"] = "shared-token"
     with pytest.raises(RadarConfigError):
         RadarPublisher(config=config)
+
+
+def test_environment_mismatch_is_rejected(radar_oauth_config, radar_redis):
+    from ckanext.dataset_transfer.services.radar_oauth import (
+        RadarOAuthConfigError,
+        RadarOAuthService,
+    )
+
+    config = dict(radar_oauth_config)
+    config["ckanext.dataset_transfer.radar.context_url"] = (
+        "https://www.radar-service.eu/radar"
+    )
+    with pytest.raises(RadarOAuthConfigError):
+        RadarOAuthService(config=config, redis_client=radar_redis)
 
 
 def test_workspace_permission_error_is_clear(radar_oauth_config):
@@ -559,69 +475,84 @@ def test_workspace_permission_error_is_clear(radar_oauth_config):
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_publish_page_shows_connection_state_without_exposing_token(
-    app, radar_oauth_config
+def test_callback_and_page_status_are_dataset_specific(
+    app, monkeypatch, radar_oauth_config, radar_redis
 ):
-    import ckan.plugins.toolkit as toolkit
     import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
+    from ckanext.dataset_transfer.services import radar_oauth
 
     user = factories.SysadminWithToken()
-    dataset = factories.Dataset()
-    disconnected = app.get(
-        toolkit.url_for("dataset_transfer.publish_page", dataset_name=dataset["name"]),
+    dataset_a = factories.Dataset()
+    dataset_b = factories.Dataset()
+    _, query, client = _begin_oauth(app, user, dataset_a)
+    monkeypatch.setattr(
+        radar_oauth.requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(200, {
+            "access_token": "dataset-a-token",
+            "refresh_token": "dataset-a-refresh",
+            "expires_in": 3600,
+        }),
+    )
+    callback = client.get(
+        "/dataset_transfer/radar/callback?code=code&state={}".format(
+            query["state"][0]
+        ),
         headers=_auth_headers(user),
-    ).get_data(as_text=True)
-    assert "Connect your RADAR4Ing account" in disconnected
-    assert "Connect to RADAR4Ing" in disconnected
-    assert 'data-radar-connected="false"' in disconnected
-
-    RadarOAuthService()._save_token_response(user["id"], {
-        "access_token": "never-render-access",
-        "refresh_token": "never-render-refresh",
-        "expires_in": 3600,
-    })
-    connected = app.get(
-        toolkit.url_for(
-            "dataset_transfer.publish_page",
-            dataset_name=dataset["name"],
-            publish_target="radar",
+        status=302,
+        follow_redirects=False,
+    )
+    assert dataset_a["name"] in callback.location
+    page_a = client.get(
+        "/dataset_transfer/publish_page/{}?publish_target=radar".format(
+            dataset_a["name"]
         ),
         headers=_auth_headers(user),
     ).get_data(as_text=True)
-    assert "Connected to RADAR4Ing" in connected
-    assert 'data-radar-connected="true"' in connected
-    assert '<option value="radar" selected>' in connected
-    assert "never-render-access" not in connected
-    assert "never-render-refresh" not in connected
+    page_b = client.get(
+        "/dataset_transfer/publish_page/{}?publish_target=radar".format(
+            dataset_b["name"]
+        ),
+        headers=_auth_headers(user),
+    ).get_data(as_text=True)
+    assert "RADAR4Ing authorization successful" in page_a
+    assert 'data-radar-connected="true"' in page_a
+    assert "Connect your RADAR4Ing account" in page_b
+    assert 'data-radar-connected="false"' in page_b
+    assert "dataset-a-token" not in page_a
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_disconnect_requires_csrf_and_affects_only_current_user(
-    app, radar_oauth_config
+def test_disconnect_requires_csrf_and_removes_only_current_dataset(
+    app, monkeypatch, radar_oauth_config, radar_redis
 ):
-    import ckan.plugins.toolkit as toolkit
     import ckan.tests.factories as factories
-    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
+    from ckanext.dataset_transfer.services import radar_oauth
 
     user = factories.SysadminWithToken()
-    other = factories.User()
     dataset = factories.Dataset()
-    service = RadarOAuthService()
-    for current_user, token in ((user, "current"), (other, "other")):
-        service._save_token_response(current_user["id"], {
-            "access_token": token,
-            "refresh_token": token + "-refresh",
-            "expires_in": 3600,
-        })
-    client = app.test_client()
+    _, query, client = _begin_oauth(app, user, dataset)
+    monkeypatch.setattr(
+        radar_oauth.requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(200, {
+            "access_token": "access", "refresh_token": "refresh", "expires_in": 3600
+        }),
+    )
+    client.get(
+        "/dataset_transfer/radar/callback?code=code&state={}".format(
+            query["state"][0]
+        ),
+        headers=_auth_headers(user),
+        follow_redirects=False,
+    )
     page = client.get(
-        toolkit.url_for("dataset_transfer.publish_page", dataset_name=dataset["name"]),
+        "/dataset_transfer/publish_page/{}?publish_target=radar".format(
+            dataset["name"]
+        ),
         headers=_auth_headers(user),
     ).get_data(as_text=True)
     csrf = re.search(r'name="_csrf_token" value="([^"]+)"', page)
-    assert csrf, page
-
     rejected = client.post(
         "/dataset_transfer/radar/disconnect",
         data={"dataset_name": dataset["name"]},
@@ -629,7 +560,6 @@ def test_disconnect_requires_csrf_and_affects_only_current_user(
         expect_errors=True,
     )
     assert rejected.status_code == 400
-
     response = client.post(
         "/dataset_transfer/radar/disconnect",
         data={
@@ -641,16 +571,59 @@ def test_disconnect_requires_csrf_and_affects_only_current_user(
         follow_redirects=False,
     )
     assert dataset["name"] in response.location
-    assert service.connection_status(user["id"], False)["connected"] is False
-    assert service.get_valid_access_token(other["id"]) == "other"
+    disconnected = client.get(
+        "/dataset_transfer/publish_page/{}?publish_target=radar".format(
+            dataset["name"]
+        ),
+        headers=_auth_headers(user),
+    ).get_data(as_text=True)
+    assert 'data-radar-connected="false"' in disconnected
 
 
-def test_frontend_gates_radar_review_without_changing_metadata_navigation():
+def test_frontend_preserves_metadata_navigation_and_cleans_up_cancel():
     source = (
         Path(__file__).parents[1] / "public" / "transfer.js"
     ).read_text(encoding="utf-8")
     assert "data('radar-connected') !== true" in source
+    assert "radar_cancel_disconnect_form" in source
     assert "let radarSectionOrder = ['dataset', 'creators', 'classification', 'rights', 'funding'];" in source
     assert "formdata.set('radar_metadata', JSON.stringify(collect_radar_metadata()));" in source
     assert "radar.user_password" not in source
     assert "radar.user_name" not in source
+
+
+def test_oauth_service_has_no_database_model_dependency():
+    service_source = (
+        Path(__file__).parents[1] / "services" / "radar_oauth.py"
+    ).read_text(encoding="utf-8")
+    migration_source = (
+        Path(__file__).parents[1]
+        / "migration" / "dataset_transfer" / "versions"
+        / "8c7e4d91a2f0_add_radar_oauth_tables.py"
+    ).read_text(encoding="utf-8")
+    assert "RadarOAuthToken" not in service_source
+    assert "models.radar_oauth" not in service_source
+    assert "ckan.model" not in service_source
+    assert "op.create_table" not in migration_source
+    assert "op.drop_table" not in migration_source
+
+
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_compatibility_revision_creates_no_oauth_tables(radar_redis):
+    import sqlalchemy as sa
+    from ckan.model import meta
+
+    inspector = sa.inspect(meta.Session.bind)
+    assert not inspector.has_table("radar_oauth_token")
+    assert not inspector.has_table("radar_oauth_state")
+
+
+@pytest.mark.usefixtures("clean_db")
+def test_redis_oauth_service_works_without_extension_migration(
+    radar_oauth_config, radar_redis
+):
+    service = _service(radar_redis)
+    _store_attempt(service)
+    assert service.get_valid_access_token(
+        "user-a", "dataset-a", "binding-a", "attempt-a"
+    ) == "access-a"

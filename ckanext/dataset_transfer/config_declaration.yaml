@@ -38,6 +38,12 @@ groups:
       - key: ckanext.dataset_transfer.radar.oauth_state_ttl
         description: Maximum OAuth state lifetime in seconds.
         default: 600
+      - key: ckanext.dataset_transfer.radar.oauth_attempt_ttl
+        description: Lifetime in seconds for one dataset-specific RADAR authorization while metadata is reviewed.
+        default: 3600
+      - key: ckanext.dataset_transfer.radar.oauth_active_attempt_ttl
+        description: Bounded lease in seconds for an already claimed, active RADAR publication.
+        default: 7200
       - key: ckanext.dataset_transfer.radar.oauth_timeout
         description: OAuth token request timeout in seconds.
         default: 30
