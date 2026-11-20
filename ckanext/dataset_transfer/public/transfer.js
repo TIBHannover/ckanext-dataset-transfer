@@ -5,8 +5,35 @@ let radarDynamicRowId = 0;
 let radarIdentifierVerificationSequence = 0;
 let radarIdentifierVerificationCache = {orcid: {}, ror: {}};
 let radarIdentifierVerificationRequests = {orcid: {}, ror: {}};
+let radarOrganizationSearchSequence = 0;
+let radarOrganizationSearchCache = {};
 const radarIdentifierDebounceDelay = 500;
 const radarIdentifierRequestTimeout = 6000;
+const radarOrganizationSearchDelay = 500;
+const radarSupportedRights = [
+    'CC BY 4.0 Attribution',
+    'CC BY-ND 4.0 Attribution-NoDerivs',
+    'CC BY-SA 4.0 Attribution-ShareAlike',
+    'CC BY-NC 4.0 Attribution-NonCommercial',
+    'CC BY-NC-SA 4.0 Attribution-NonCommercial-ShareAlike',
+    'CC BY-NC-ND 4.0 Attribution-NonCommercial-NoDerivs',
+    'CC0 1.0 Universal Public Domain Dedication',
+    'Public Domain Mark 1.0',
+    'Attribution License (ODC-By)',
+    'Open Database License (ODC-ODbL)',
+    'Public Domain Dedication and License (PDDL)',
+    'Apache License 2.0',
+    'Common Development and Distribution License 1.0',
+    'Eclipse Public License 1.0',
+    'Eclipse Public License 2.0',
+    'GNU General Public License v3.0 only',
+    'GNU Lesser General Public License v3.0 only',
+    'BSD 2-Clause Simplified License',
+    'BSD 3-Clause New or Revised License',
+    'MIT License',
+    'All rights reserved',
+    'Other'
+];
 
 $(document).ready(function(){
     $('#dataset_transfer_cancel_btn').on('click', function(event){
@@ -346,6 +373,20 @@ $(document).ready(function(){
      $(document).on('blur', '.radar-orcid, .radar-affiliation-ror, .radar-publisher-identifier, .radar-rights-holder-identifier', function(){
         validate_identifier_after_blur($(this));
      });
+     $(document).on('input', '.radar-organization-search', function(){
+        schedule_ror_organization_search($(this));
+     });
+     $(document).on('keydown', '.radar-organization-search', function(event){
+        handle_ror_search_keyboard($(this), event);
+     });
+     $(document).on('click', '.radar-ror-suggestion', function(){
+        select_ror_organization($(this).closest('.radar-ror-search-results').data('radar-input'), $(this).data('radar-organization'));
+     });
+     $(document).on('click', function(event){
+        if(!$(event.target).closest('.radar-ror-search-group').length){
+            close_all_ror_search_results();
+        }
+     });
      $('#radar_rights_same_as_publisher').change(toggle_rights_holder_same_as_publisher);
 
      if($.fn.select2 && $('#radar_language').length){
@@ -438,7 +479,7 @@ function radar_section_for_field(field){
         title: 'dataset', descriptions: 'dataset', production_year: 'dataset',
         resource_type: 'dataset', resource: 'dataset', version: 'dataset',
         additional_titles: 'dataset', creators: 'creators',
-        contributors: 'classification', subject_areas: 'classification',
+        contributors: 'creators', subject_areas: 'classification',
         keywords: 'classification', language: 'classification',
         publishers: 'rights', rights: 'rights', additional_rights: 'rights',
         rights_holders: 'rights', funding_references: 'funding',
@@ -498,6 +539,210 @@ function update_person_type(row){
     row.find('.radar-given-name, .radar-family-name').closest('.form-group')
         .toggle(!isInstitution);
     if(!isInstitution){ derive_person_name(row); }
+}
+
+function organization_identifier_fields(input){
+    let row = input.closest('.radar-row');
+    if(input.hasClass('radar-affiliation')){
+        return {identifier: row.find('.radar-affiliation-ror').first(), kind: 'affiliation'};
+    }
+    if(input.hasClass('radar-publisher-name')){
+        return {
+            identifier: row.find('.radar-publisher-identifier').first(),
+            scheme: row.find('.radar-publisher-scheme').first(),
+            schemeUri: row.find('.radar-publisher-scheme-uri').first(),
+            kind: 'publisher'
+        };
+    }
+    return {
+        identifier: row.find('.radar-rights-holder-identifier').first(),
+        scheme: row.find('.radar-rights-holder-scheme').first(),
+        schemeUri: row.find('.radar-rights-holder-scheme-uri').first(),
+        kind: 'rights-holder'
+    };
+}
+
+function schedule_ror_organization_search(input){
+    clearTimeout(input.data('radar-ror-search-timer'));
+    let selectedName = clean_value(input.data('radar-selected-ror-name'));
+    let selectedId = clean_value(input.data('radar-selected-ror-id'));
+    let fields = organization_identifier_fields(input);
+    if(selectedName && clean_value(input.val()) !== selectedName){
+        if(clean_value(fields.identifier.val()) === selectedId){
+            fields.identifier.val('');
+            invalidate_identifier_verification(fields.identifier);
+            if(fields.scheme){ fields.scheme.val(''); }
+            if(fields.schemeUri){ fields.schemeUri.val(''); }
+            if(fields.kind === 'publisher'){
+                update_publisher_scheme(input.closest('.radar-publisher-row'));
+                sync_rights_holder_from_publisher();
+            }
+            else if(fields.kind === 'rights-holder'){
+                update_rights_holder_scheme(input.closest('.radar-rights-holder-row'));
+            }
+        }
+        input.removeData('radar-selected-ror-name radar-selected-ror-id');
+    }
+    let query = clean_value(input.val());
+    radarOrganizationSearchSequence += 1;
+    input.data('radar-ror-search-sequence', radarOrganizationSearchSequence);
+    if(query.length < 2){
+        close_ror_search_results(input);
+        return;
+    }
+    input.data('radar-ror-search-timer', setTimeout(function(){
+        search_ror_organizations(input, query, input.data('radar-ror-search-sequence'));
+    }, radarOrganizationSearchDelay));
+}
+
+function search_ror_organizations(input, query, sequence){
+    render_ror_search_message(input, 'Searching the ROR registry…', true);
+    let cacheKey = query.toLocaleLowerCase();
+    let cached = radarOrganizationSearchCache[cacheKey];
+    if(cached){
+        render_ror_search_if_current(input, query, sequence, cached);
+        return;
+    }
+    $.ajax({
+        url: 'https://api.ror.org/v2/organizations',
+        method: 'GET',
+        dataType: 'json',
+        data: {query: query},
+        timeout: radarIdentifierRequestTimeout
+    }).then(function(data){
+        let results = parse_ror_organization_results(data);
+        radarOrganizationSearchCache[cacheKey] = results;
+        render_ror_search_if_current(input, query, sequence, results);
+    }, function(){
+        if(ror_search_is_current(input, query, sequence)){
+            render_ror_search_message(input, 'Organization search is temporarily unavailable. You can continue with manual entry.', false);
+        }
+    });
+}
+
+function parse_ror_organization_results(data){
+    return $.map((data && data.items) || [], function(item){
+        let name = '';
+        $.each(item.names || [], function(_, candidate){
+            if((candidate.types || []).indexOf('ror_display') !== -1){
+                name = candidate.value || '';
+                return false;
+            }
+        });
+        if(!name && item.names && item.names.length){ name = item.names[0].value || ''; }
+        let normalized = normalize_ror(clean_value(item.id));
+        return name && normalized.formatValid && normalized.checksumValid ?
+            {name: name, id: normalized.canonical} : null;
+    });
+}
+
+function ror_search_is_current(input, query, sequence){
+    return input.data('radar-ror-search-sequence') === sequence && clean_value(input.val()) === query;
+}
+
+function render_ror_search_if_current(input, query, sequence, results){
+    if(!ror_search_is_current(input, query, sequence)){ return; }
+    if(!results.length){
+        render_ror_search_message(input, 'No matching organizations found.', false);
+        return;
+    }
+    let list = ror_search_results(input).empty().attr('role', 'listbox');
+    $.each(results.slice(0, 10), function(index, organization){
+        $('<button type="button" class="radar-ror-suggestion" role="option"></button>')
+            .attr('id', list.attr('id') + '_option_' + index)
+            .append($('<strong></strong>').text(organization.name))
+            .append($('<small></small>').text(organization.id))
+            .data('radar-organization', organization)
+            .appendTo(list);
+    });
+    open_ror_search_results(input, list);
+}
+
+function ror_search_results(input){
+    let group = input.closest('.radar-ror-search-group');
+    let list = group.find('.radar-ror-search-results').first();
+    if(!list.length){
+        let inputId = input.attr('id') || ('radar_ror_search_' + (++radarDynamicRowId));
+        input.attr('id', inputId);
+        list = $('<div class="radar-ror-search-results" aria-live="polite"></div>')
+            .attr('id', inputId + '_results')
+            .data('radar-input', input)
+            .appendTo(group);
+        input.attr('aria-controls', list.attr('id'));
+    }
+    return list;
+}
+
+function render_ror_search_message(input, message, loading){
+    let list = ror_search_results(input).empty().removeAttr('role');
+    $('<div class="radar-ror-search-message"></div>').text(message).appendTo(list);
+    input.attr('aria-busy', loading ? 'true' : 'false');
+    open_ror_search_results(input, list);
+}
+
+function open_ror_search_results(input, list){
+    close_all_ror_search_results(input);
+    list.show();
+    input.attr('aria-expanded', 'true');
+}
+
+function close_ror_search_results(input){
+    input.closest('.radar-ror-search-group').find('.radar-ror-search-results').hide();
+    input.attr('aria-expanded', 'false').removeAttr('aria-activedescendant aria-busy');
+}
+
+function close_all_ror_search_results(exceptInput){
+    $('.radar-organization-search').each(function(){
+        if(!exceptInput || this !== exceptInput[0]){ close_ror_search_results($(this)); }
+    });
+}
+
+function handle_ror_search_keyboard(input, event){
+    let list = input.closest('.radar-ror-search-group').find('.radar-ror-search-results:visible');
+    if(!list.length){ return; }
+    let options = list.find('.radar-ror-suggestion');
+    if(event.key === 'Escape'){
+        close_ror_search_results(input);
+        return;
+    }
+    if(!options.length || ['ArrowDown', 'ArrowUp', 'Enter'].indexOf(event.key) === -1){ return; }
+    event.preventDefault();
+    let active = options.filter('.is-active');
+    let index = active.length ? options.index(active) : -1;
+    if(event.key === 'Enter'){
+        if(active.length){ select_ror_organization(input, active.data('radar-organization')); }
+        return;
+    }
+    index += event.key === 'ArrowDown' ? 1 : -1;
+    if(index < 0){ index = options.length - 1; }
+    if(index >= options.length){ index = 0; }
+    options.removeClass('is-active').attr('aria-selected', 'false');
+    active = options.eq(index).addClass('is-active').attr('aria-selected', 'true');
+    input.attr('aria-activedescendant', active.attr('id'));
+}
+
+function select_ror_organization(input, organization){
+    if(!input || !organization){ return; }
+    let fields = organization_identifier_fields(input);
+    clearTimeout(input.data('radar-ror-search-timer'));
+    radarOrganizationSearchSequence += 1;
+    input.data('radar-ror-search-sequence', radarOrganizationSearchSequence);
+    input.val(organization.name)
+        .data('radar-selected-ror-name', organization.name)
+        .data('radar-selected-ror-id', organization.id);
+    fields.identifier.val(organization.id);
+    if(fields.scheme){ fields.scheme.val('ROR'); }
+    if(fields.schemeUri){ fields.schemeUri.val('https://ror.org/'); }
+    close_ror_search_results(input);
+    validate_identifier_input(fields.identifier, true);
+    if(fields.kind === 'publisher'){
+        update_publisher_scheme(input.closest('.radar-publisher-row'));
+        sync_rights_holder_from_publisher();
+    }
+    else if(fields.kind === 'rights-holder'){
+        update_rights_holder_scheme(input.closest('.radar-rights-holder-row'));
+    }
+    mark_active_radar_section_unreviewed();
 }
 
 function detect_identifier_scheme(row, kind){
@@ -885,6 +1130,7 @@ function validate_radar_metadata_in_browser(metadata){
         if(publisher.name_identifier_scheme === 'ORCID' && publisher.name_identifier && !valid_orcid_format(publisher.name_identifier)){ errors.push({field: 'publishers.' + index + '.name_identifier', message: 'Please provide a valid publisher ORCID.'}); }
     });
     if(!metadata.rights){ errors.push({field: 'rights', message: 'Please select a licence.'}); }
+    else if(radarSupportedRights.indexOf(metadata.rights) === -1){ errors.push({field: 'rights', message: 'Please select a valid RADAR licence.'}); }
     if(!metadata.rights_holders.length){ errors.push({field: 'rights_holders', message: 'Please provide a rights holder.'}); }
     $.each(metadata.rights_holders, function(index, holder){
         if(!holder.name){ errors.push({field: 'rights_holders.' + index + '.name', message: 'Please provide the rights holder name.'}); }
@@ -998,7 +1244,7 @@ function format_radar_person(item){
         ['Affiliation ROR', item.affiliation_ror]
     ];
     if(item.creator_type){
-        details.unshift(['Creator Type', item.creator_type === 'institution' ? 'Institution' : 'Person and affiliation']);
+        details.unshift(['Creator Type', item.creator_type === 'institution' ? 'Institution' : 'Person']);
     }
     return format_radar_details(name, details);
 }
@@ -1051,22 +1297,23 @@ function add_radar_row(container, template){
     radarDynamicRowId += 1;
     let id = 'radar_dynamic_' + radarDynamicRowId;
     let remove = '<div class="col-md-1 radar-remove-column"><button type="button" class="btn btn-default btn-sm radar-remove" aria-label="Remove">&times;</button></div>';
+    let keywordRemove = '<div class="col-md-1 radar-remove-column"><button type="button" class="btn btn-default btn-sm radar-remove" aria-label="Remove keyword" title="Remove keyword"><i class="fa fa-trash" aria-hidden="true"></i></button></div>';
     let html = '';
     if(template === 'text'){ html = '<div class="radar-row input-group"><label class="sr-only" for="' + id + '">Value</label><input id="' + id + '" class="form-control radar-value"><span class="input-group-btn"><button type="button" class="btn btn-default radar-remove" aria-label="Remove">&times;</button></span></div>'; }
     else if(template === 'publisher'){
-        html = '<div class="radar-row radar-publisher-row"><div class="radar-card-heading"><strong>Publisher</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row"><div class="col-md-6 form-group"><label for="' + id + '_name">Publisher Name *</label><input id="' + id + '_name" class="form-control radar-publisher-name"></div><div class="col-md-6 form-group"><label for="' + id + '_identifier">Publisher Identifier</label><input id="' + id + '_identifier" class="form-control radar-publisher-identifier" placeholder="https://ror.org/..."></div></div><div class="row radar-identifier-details"><div class="col-md-6 form-group"><label for="' + id + '_scheme">Identifier Scheme</label><select id="' + id + '_scheme" class="form-control radar-publisher-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div></div><input type="hidden" class="radar-publisher-scheme-uri"></div>';
+        html = '<div class="radar-row radar-publisher-row"><div class="radar-card-heading"><strong>Publisher</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row"><div class="col-md-6 form-group radar-ror-search-group"><label for="' + id + '_name">Publisher Name *</label><input id="' + id + '_name" class="form-control radar-publisher-name radar-organization-search" autocomplete="off" aria-autocomplete="list" aria-expanded="false"><span class="help-block">Type at least 2 characters to search the ROR registry, or enter an organization manually.</span></div><div class="col-md-6 form-group"><label for="' + id + '_identifier">Publisher Identifier</label><input id="' + id + '_identifier" class="form-control radar-publisher-identifier" placeholder="https://ror.org/..."></div></div><div class="row radar-identifier-details"><div class="col-md-6 form-group"><label for="' + id + '_scheme">Identifier Scheme</label><select id="' + id + '_scheme" class="form-control radar-publisher-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div></div><input type="hidden" class="radar-publisher-scheme-uri"></div>';
     }
     else if(template === 'rights-holder'){
-        html = '<div class="radar-row radar-rights-holder-row"><div class="radar-card-heading"><strong>Rights Holder</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row"><div class="col-md-6 form-group"><label for="' + id + '_name">Rights Holder Name *</label><input id="' + id + '_name" class="form-control radar-rights-holder-name"></div><div class="col-md-6 form-group"><label for="' + id + '_identifier">Name Identifier</label><input id="' + id + '_identifier" class="form-control radar-rights-holder-identifier" placeholder="https://ror.org/..."></div></div><div class="row radar-identifier-details"><div class="col-md-6 form-group"><label for="' + id + '_scheme">Identifier Scheme</label><select id="' + id + '_scheme" class="form-control radar-rights-holder-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div></div><input type="hidden" class="radar-rights-holder-scheme-uri"></div>';
+        html = '<div class="radar-row radar-rights-holder-row"><div class="radar-card-heading"><strong>Rights Holder</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row"><div class="col-md-6 form-group radar-ror-search-group"><label for="' + id + '_name">Rights Holder Name *</label><input id="' + id + '_name" class="form-control radar-rights-holder-name radar-organization-search" autocomplete="off" aria-autocomplete="list" aria-expanded="false"><span class="help-block">Type at least 2 characters to search the ROR registry, or enter an organization manually.</span></div><div class="col-md-6 form-group"><label for="' + id + '_identifier">Name Identifier</label><input id="' + id + '_identifier" class="form-control radar-rights-holder-identifier" placeholder="https://ror.org/..."></div></div><div class="row radar-identifier-details"><div class="col-md-6 form-group"><label for="' + id + '_scheme">Identifier Scheme</label><select id="' + id + '_scheme" class="form-control radar-rights-holder-scheme">' + $('#radar-template-publisher-scheme-options').html() + '</select></div></div><input type="hidden" class="radar-rights-holder-scheme-uri"></div>';
     }
     else if(template === 'textarea'){ html = '<div class="radar-row"><label class="sr-only" for="' + id + '">Description</label><textarea id="' + id + '" class="form-control radar-value" rows="3"></textarea><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div>'; }
     else if(template === 'creator' || template === 'contributor'){
         let label = template === 'contributor' ? 'Contributor' : 'Creator';
-        let role = template === 'contributor' ? '<div class="col-md-3 form-group"><label for="' + id + '_role">Role</label><select id="' + id + '_role" class="form-control radar-contributor-type">' + $('#radar-template-options').html() + '</select></div>' : '';
-        html = '<div class="radar-row radar-person-row radar-person-card' + (template === 'contributor' ? ' radar-contributor-row' : '') + '"><div class="radar-card-heading"><strong>' + label + '</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row radar-personal-fields"><div class="col-md-4 form-group"><label for="' + id + '_type">' + label + ' Type</label><select id="' + id + '_type" class="form-control radar-creator-type"><option value="person" selected>Person and affiliation</option><option value="institution">Institution</option></select></div><div class="col-md-4 form-group"><label for="' + id + '_given">Given Name</label><input id="' + id + '_given" class="form-control radar-given-name"></div><div class="col-md-4 form-group"><label for="' + id + '_family">Family Name</label><input id="' + id + '_family" class="form-control radar-family-name"></div></div><div class="row"><div class="col-md-' + (template === 'contributor' ? '5' : '7') + ' form-group"><label for="' + id + '_name">' + (template === 'contributor' ? 'Complete Name' : 'Creator Name *') + '</label><input id="' + id + '_name" class="form-control radar-name"></div><div class="col-md-' + (template === 'contributor' ? '4' : '5') + ' form-group"><label for="' + id + '_orcid">ORCID</label><input id="' + id + '_orcid" class="form-control radar-orcid" placeholder="https://orcid.org/0000-0000-0000-0000"></div>' + role + '</div><div class="row radar-affiliation-fields"><div class="col-md-6 form-group"><label for="' + id + '_affiliation">Affiliation</label><input id="' + id + '_affiliation" class="form-control radar-affiliation"></div><div class="col-md-6 form-group"><label for="' + id + '_ror">Affiliation ROR</label><input id="' + id + '_ror" class="form-control radar-affiliation-ror" placeholder="https://ror.org/..."></div></div></div>';
+        let role = template === 'contributor' ? '<div class="col-md-4 form-group"><label for="' + id + '_role">Role</label><select id="' + id + '_role" class="form-control radar-contributor-type">' + $('#radar-template-options').html() + '</select></div>' : '';
+        html = '<div class="radar-row radar-person-row radar-person-card' + (template === 'contributor' ? ' radar-contributor-row' : '') + '"><div class="radar-card-heading"><strong>' + label + '</strong><button type="button" class="btn btn-default btn-sm radar-remove">Remove</button></div><div class="row radar-personal-fields"><div class="col-md-4 form-group"><label for="' + id + '_type">' + label + ' Type</label><select id="' + id + '_type" class="form-control radar-creator-type"><option value="person" selected>Person</option><option value="institution">Institution</option></select></div><div class="col-md-8 form-group"><label for="' + id + '_name">' + label + ' Name' + (template === 'creator' ? ' *' : '') + '</label><input id="' + id + '_name" class="form-control radar-name"></div></div><div class="row"><div class="col-md-6 form-group"><label for="' + id + '_given">Given Name</label><input id="' + id + '_given" class="form-control radar-given-name"></div><div class="col-md-6 form-group"><label for="' + id + '_family">Family Name</label><input id="' + id + '_family" class="form-control radar-family-name"></div></div><div class="row"><div class="col-md-' + (template === 'contributor' ? '8' : '12') + ' form-group"><label for="' + id + '_orcid">ORCID</label><input id="' + id + '_orcid" class="form-control radar-orcid" placeholder="https://orcid.org/0000-0000-0000-0000"></div>' + role + '</div><div class="row radar-affiliation-fields"><div class="col-md-6 form-group radar-ror-search-group"><label for="' + id + '_affiliation">Affiliation</label><input id="' + id + '_affiliation" class="form-control radar-affiliation radar-organization-search" autocomplete="off" aria-autocomplete="list" aria-expanded="false"><span class="help-block">Type at least 2 characters to search the ROR registry, or enter an affiliation manually.</span></div><div class="col-md-6 form-group"><label for="' + id + '_ror">Affiliation ROR</label><input id="' + id + '_ror" class="form-control radar-affiliation-ror" placeholder="https://ror.org/..."></div></div></div>';
     }
     else if(template === 'subject-area'){ html = '<div class="radar-row row"><div class="col-md-5"><select class="form-control radar-subject-controlled">' + $('#radar-template-subject-options').html() + '</select></div><div class="col-md-6"><input class="form-control radar-subject-additional" placeholder="Specify when Other"></div>' + remove + '</div>'; }
-    else if(template === 'keyword'){ html = '<div class="radar-row radar-keyword-row"><div class="row"><div class="col-md-11"><label for="' + id + '">Keyword</label><input id="' + id + '" class="form-control radar-value"></div>' + remove + '</div><input type="hidden" class="radar-keyword-scheme" value="Other"><input type="hidden" class="radar-scheme-uri"><input type="hidden" class="radar-value-uri"><input type="hidden" class="radar-classification-code"><input type="hidden" class="radar-ontology-uri"><input type="hidden" class="radar-ontology-id"></div>'; }
+    else if(template === 'keyword'){ html = '<div class="radar-row radar-keyword-row"><div class="row"><div class="col-md-11"><label for="' + id + '">Keyword</label><input id="' + id + '" class="form-control radar-value"></div>' + keywordRemove + '</div><input type="hidden" class="radar-keyword-scheme" value="Other"><input type="hidden" class="radar-scheme-uri"><input type="hidden" class="radar-value-uri"><input type="hidden" class="radar-classification-code"><input type="hidden" class="radar-ontology-uri"><input type="hidden" class="radar-ontology-id"></div>'; }
     else if(template === 'additional-title'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Title"></div><div class="col-md-4"><select class="form-control radar-type">' + $('#radar-template-additional-title-options').html() + '</select></div>' + remove + '</div>'; }
     else if(template === 'description'){ html = '<div class="radar-row row"><div class="col-md-7"><textarea class="form-control radar-value" rows="2" placeholder="Description"></textarea></div><div class="col-md-4"><select class="form-control radar-type">' + $('#radar-template-description-options').html() + '</select></div>' + remove + '</div>'; }
     else if(template === 'alternate-identifier'){ html = '<div class="radar-row row"><div class="col-md-7"><input class="form-control radar-value" placeholder="Identifier"></div><div class="col-md-4"><input class="form-control radar-type" placeholder="Identifier type"></div>' + remove + '</div>'; }

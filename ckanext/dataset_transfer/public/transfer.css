@@ -337,6 +337,54 @@
   padding: 8px 12px;
 }
 
+#publish_radar_metadata_step .radar-ror-search-group {
+  position: relative;
+}
+
+#publish_radar_metadata_step .radar-ror-search-results {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, .12);
+  display: none;
+  left: 15px;
+  max-height: 240px;
+  overflow-y: auto;
+  position: absolute;
+  right: 15px;
+  top: 59px;
+  z-index: 20;
+}
+
+#publish_radar_metadata_step .radar-ror-suggestion {
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #eee;
+  color: inherit;
+  display: block;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+#publish_radar_metadata_step .radar-ror-suggestion:hover,
+#publish_radar_metadata_step .radar-ror-suggestion:focus,
+#publish_radar_metadata_step .radar-ror-suggestion.is-active {
+  background: #f5f5f5;
+  outline: 0;
+}
+
+#publish_radar_metadata_step .radar-ror-suggestion small {
+  color: #777;
+  display: block;
+  margin-top: 2px;
+}
+
+#publish_radar_metadata_step .radar-ror-search-message {
+  color: #777;
+  padding: 8px 10px;
+}
+
 .publish-radar-connection {
   border-top: 1px solid #ddd;
   padding-top: 4px;

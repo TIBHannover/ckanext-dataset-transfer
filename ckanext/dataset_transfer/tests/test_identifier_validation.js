@@ -22,6 +22,14 @@ function loadTransferScript() {
       if (callback(index, items[index]) === false) { break; }
     }
   };
+  jquery.map = function (items, callback) {
+    const results = [];
+    for (let index = 0; index < items.length; index += 1) {
+      const value = callback(items[index], index);
+      if (value !== null && value !== undefined) { results.push(value); }
+    }
+    return results;
+  };
   const context = {
     console,
     document: {},
@@ -146,6 +154,35 @@ test('stale verification responses are ignored after an identifier changes', () 
   );
 });
 
+test('ROR organization search parses only valid official results', () => {
+  const context = loadTransferScript();
+  const results = context.parse_ror_organization_results({items: [
+    {
+      id: 'https://ror.org/04aj4c181',
+      names: [
+        {types: ['label'], value: 'LUH'},
+        {types: ['ror_display'], value: 'Leibniz University Hannover'}
+      ]
+    },
+    {id: 'not-a-ror', names: [{types: ['ror_display'], value: 'Invalid'}]}
+  ]});
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(results)),
+    [{name: 'Leibniz University Hannover', id: 'https://ror.org/04aj4c181'}]
+  );
+});
+
+test('organization search is bound to the current query and request sequence', () => {
+  const context = loadTransferScript();
+  const input = {
+    data: function (key) { return key === 'radar-ror-search-sequence' ? 8 : undefined; },
+    val: function () { return 'TIB'; }
+  };
+  assert.equal(context.ror_search_is_current(input, 'TIB', 8), true);
+  assert.equal(context.ror_search_is_current(input, 'TIB', 7), false);
+  assert.equal(context.ror_search_is_current(input, 'Leibniz', 8), false);
+});
+
 test('delegated handlers cover existing and dynamic identifier fields without changing the payload', () => {
   const source = transferSource();
   const delegatedSelector = '.radar-orcid, .radar-affiliation-ror, .radar-publisher-identifier, .radar-rights-holder-identifier';
@@ -164,4 +201,7 @@ test('delegated handlers cover existing and dynamic identifier fields without ch
   assert.match(source, /if\(creator\.affiliation_ror && !valid_ror_format/);
   assert.match(source, /if\(publisher\.name_identifier_scheme === 'ROR'/);
   assert.match(source, /if\(holder\.name_identifier_scheme === 'ROR'/);
+  assert.ok(source.includes("$(document).on('input', '.radar-organization-search'"));
+  assert.ok(source.includes("url: 'https://api.ror.org/v2/organizations'"));
+  assert.match(source, /class="fa fa-trash"/);
 });

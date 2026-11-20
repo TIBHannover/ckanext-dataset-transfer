@@ -31,8 +31,8 @@ RIGHTS = (
     "CC BY-NC-SA 4.0 Attribution-NonCommercial-ShareAlike",
     "CC BY-NC-ND 4.0 Attribution-NonCommercial-NoDerivs",
     "CC0 1.0 Universal Public Domain Dedication", "Public Domain Mark 1.0",
-    "Public Domain Dedication and License (PDDL)", "Attribution License (ODC-By)",
-    "Open Database License (ODC-ODbL)", "Apache License 2.0",
+    "Attribution License (ODC-By)", "Open Database License (ODC-ODbL)",
+    "Public Domain Dedication and License (PDDL)", "Apache License 2.0",
     "Common Development and Distribution License 1.0", "Eclipse Public License 1.0",
     "Eclipse Public License 2.0", "GNU General Public License v3.0 only",
     "GNU Lesser General Public License v3.0 only", "BSD 2-Clause Simplified License",
@@ -118,14 +118,33 @@ LANGUAGES = (("", "Not specified"),) + _language_vocabulary()
 
 
 LICENSE_MAP = {
+    "cc-by": "CC BY 4.0 Attribution",
     "cc-by-4.0": "CC BY 4.0 Attribution",
+    "cc-by-nd": "CC BY-ND 4.0 Attribution-NoDerivs",
     "cc-by-nd-4.0": "CC BY-ND 4.0 Attribution-NoDerivs",
+    "cc-by-sa": "CC BY-SA 4.0 Attribution-ShareAlike",
     "cc-by-sa-4.0": "CC BY-SA 4.0 Attribution-ShareAlike",
+    "cc-by-nc": "CC BY-NC 4.0 Attribution-NonCommercial",
     "cc-by-nc-4.0": "CC BY-NC 4.0 Attribution-NonCommercial",
+    "cc-by-nc-sa": "CC BY-NC-SA 4.0 Attribution-NonCommercial-ShareAlike",
     "cc-by-nc-sa-4.0": "CC BY-NC-SA 4.0 Attribution-NonCommercial-ShareAlike",
+    "cc-by-nc-nd": "CC BY-NC-ND 4.0 Attribution-NonCommercial-NoDerivs",
     "cc-by-nc-nd-4.0": "CC BY-NC-ND 4.0 Attribution-NonCommercial-NoDerivs",
+    "cc-zero": "CC0 1.0 Universal Public Domain Dedication",
     "cc0-1.0": "CC0 1.0 Universal Public Domain Dedication",
+    "pdm-1.0": "Public Domain Mark 1.0",
+    "odc-by": "Attribution License (ODC-By)",
+    "odc-odbl": "Open Database License (ODC-ODbL)",
+    "odc-pddl": "Public Domain Dedication and License (PDDL)",
+    "apache2": "Apache License 2.0",
     "apache-2.0": "Apache License 2.0",
+    "cddl-1.0": "Common Development and Distribution License 1.0",
+    "epl-1.0": "Eclipse Public License 1.0",
+    "epl-2.0": "Eclipse Public License 2.0",
+    "gpl-3.0": "GNU General Public License v3.0 only",
+    "lgpl-3.0": "GNU Lesser General Public License v3.0 only",
+    "bsd-2-clause": "BSD 2-Clause Simplified License",
+    "bsd-3-clause": "BSD 3-Clause New or Revised License",
     "mit": "MIT License",
 }
 
@@ -511,7 +530,8 @@ def apply_fixed_radar_metadata(metadata, dataset, project_id=None,
     """Reapply server-controlled RADAR values to reviewed browser metadata."""
     data = normalize_reviewed_metadata(metadata)
     data["resource_type"] = FIXED_RESOURCE_TYPE
-    data["rights"] = mapped_ckan_rights(dataset)
+    if not data["rights"]:
+        data["rights"] = mapped_ckan_rights(dataset)
     data["additional_rights"] = ""
 
     additional_subjects = []
@@ -542,16 +562,6 @@ def fixed_radar_metadata_errors(dataset, project_id=None,
                                 dfg_award_number=None):
     """Return configuration/source errors for fields fixed by server policy."""
     errors = []
-    license_id = _text((dataset or {}).get("license_id"))
-    if not mapped_ckan_rights(dataset):
-        message = (
-            "The CKAN dataset licence is not specified. Update the licence in "
-            "CKAN before transferring to RADAR."
-            if license_id.lower() == "notspecified" or not license_id
-            else "The CKAN dataset licence is not supported by RADAR. Update the licence in CKAN before transferring."
-        )
-        _error(errors, "rights", message)
-
     normalized_project = normalize_project_id(project_id)
     if not normalized_project:
         _error(
@@ -593,8 +603,6 @@ def validate_radar_metadata(metadata):
         _error(errors, "resource_type", "RADAR resource type must be Dataset.")
     if data["rights"] and data["rights"] not in RIGHTS:
         _error(errors, "rights", "Please select a valid RADAR licence.")
-    if data["rights"] == "Other" and not data["additional_rights"]:
-        _error(errors, "additional_rights", "Please describe the custom rights statement.")
     for index, publisher in enumerate(data["publishers"]):
         if not publisher["name"]:
             _error(errors, "publishers.{}.name".format(index), "Please provide the publisher name.")

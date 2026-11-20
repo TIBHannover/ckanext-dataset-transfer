@@ -386,12 +386,33 @@ def test_radar_metadata_review_renders_named_sections_and_preserves_fields(
     for section in ("creators", "classification", "rights", "funding"):
         assert 'data-radar-section="{}" role="tabpanel" hidden'.format(section) in body
     assert 'value="DataManager" selected>Data Manager</option>' in body
+    assert "Creators and Contributors" in body
+    assert "Classification and Keywords" in body
+    creators_section = body[
+        body.index('id="radar_section_creators"'):
+        body.index('id="radar_section_classification"')
+    ]
+    classification_section = body[
+        body.index('id="radar_section_classification"'):
+        body.index('id="radar_section_rights"')
+    ]
+    assert 'data-radar-list="creators"' in creators_section
+    assert 'data-radar-list="contributors"' in creators_section
+    assert 'data-radar-list="contributors"' not in classification_section
+    assert 'data-radar-list="subject_areas"' in classification_section
+    assert 'data-radar-list="keywords"' in classification_section
+    assert '>Person</option>' in body
+    assert "Person and affiliation" not in body
+    assert 'class="form-control radar-affiliation radar-organization-search"' in body
     assert 'id="radar_rights_same_as_publisher"' in body
     assert 'class="radar-publisher-scheme-uri"' in body
     assert 'class="radar-rights-holder-scheme-uri"' in body
     assert 'class="radar-keyword-scheme" value="Other"' in body
     assert 'class="radar-value-uri"' in body
     assert 'class="radar-ontology-id"' in body
+    assert 'class="fa fa-trash"' in body
+    assert 'id="radar_rights" class="form-control"' in body
+    assert body.count('<option value="CC BY 4.0 Attribution" selected>') == 1
     assert "Primary CRC Funding" in body
     assert "511148852" in body
     assert body.index('value="eng"') < body.index('value="deu"')
@@ -425,12 +446,92 @@ def test_radar_review_javascript_preserves_submission_contract_and_dynamic_rows(
     assert "radar-keyword-scheme" in source
     assert "radar-value-uri" in source
     assert "radar-ontology-id" in source
+    assert "contributors: 'creators'" in source
+    assert "parse_ror_organization_results" in source
+    assert "radar-organization-search" in source
+    assert 'class="fa fa-trash"' in source
     assert "$('#radar_language').select2" in source
     assert "Rights holder is the same as publisher" in template
     assert "<label>{{ _('Scheme URI') }}</label>" not in template
     assert publish_page.index("dataset_transfer_cancel_btn") < publish_page.index(
         "dataset_transfer_back_btn"
     ) < publish_page.index("dataset_transfer_next_btn")
+
+
+def test_radar_controlled_licences_are_editable_and_validated():
+    from ckanext.dataset_transfer.services.radar import build_radar_metadata_xml
+    from ckanext.dataset_transfer.services.radar_metadata_mapping import (
+        RIGHTS,
+        apply_fixed_radar_metadata,
+        map_ckan_to_radar,
+        mapped_ckan_rights,
+        validate_radar_metadata,
+    )
+
+    expected = (
+        "CC BY 4.0 Attribution",
+        "CC BY-ND 4.0 Attribution-NoDerivs",
+        "CC BY-SA 4.0 Attribution-ShareAlike",
+        "CC BY-NC 4.0 Attribution-NonCommercial",
+        "CC BY-NC-SA 4.0 Attribution-NonCommercial-ShareAlike",
+        "CC BY-NC-ND 4.0 Attribution-NonCommercial-NoDerivs",
+        "CC0 1.0 Universal Public Domain Dedication",
+        "Public Domain Mark 1.0",
+        "Attribution License (ODC-By)",
+        "Open Database License (ODC-ODbL)",
+        "Public Domain Dedication and License (PDDL)",
+        "Apache License 2.0",
+        "Common Development and Distribution License 1.0",
+        "Eclipse Public License 1.0",
+        "Eclipse Public License 2.0",
+        "GNU General Public License v3.0 only",
+        "GNU Lesser General Public License v3.0 only",
+        "BSD 2-Clause Simplified License",
+        "BSD 3-Clause New or Revised License",
+        "MIT License",
+        "All rights reserved",
+        "Other",
+    )
+    assert RIGHTS == expected
+    assert mapped_ckan_rights({"license_id": "cc-by"}) == expected[0]
+    assert mapped_ckan_rights({"license_id": "cc-by-sa"}) == expected[2]
+    assert mapped_ckan_rights({"license_id": "cc-zero"}) == expected[6]
+    assert mapped_ckan_rights({"license_id": "mit"}) == "MIT License"
+    assert mapped_ckan_rights({"license_id": "notspecified"}) == ""
+
+    dataset = {
+        "id": "source-id",
+        "name": "source-name",
+        "title": "Licence test",
+        "notes": "Description",
+        "author": "Ada Lovelace",
+        "license_id": "cc-by",
+        "metadata_created": "2026-01-15T12:00:00",
+        "organization": {"title": "Leibniz University Hannover"},
+        "resources": [],
+    }
+    metadata = map_ckan_to_radar(
+        dataset,
+        project_id="TRR375",
+        dfg_award_number="511148852",
+    )
+    assert metadata["rights"] == "CC BY 4.0 Attribution"
+    metadata["rights"] = "MIT License"
+    reviewed = apply_fixed_radar_metadata(
+        metadata,
+        dataset,
+        project_id="TRR375",
+        dfg_award_number="511148852",
+    )
+    validation = validate_radar_metadata(reviewed)
+    assert validation["success"], validation["errors"]
+    xml = build_radar_metadata_xml(validation["metadata"])
+    assert b"<controlledRights>MIT License</controlledRights>" in xml
+    assert dataset["license_id"] == "cc-by"
+
+    reviewed["rights"] = "Unsupported licence"
+    errors = validate_radar_metadata(reviewed)["errors"]
+    assert any(error["field"] == "rights" for error in errors)
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
