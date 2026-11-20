@@ -62,9 +62,18 @@ class RadarPublishError(Exception):
 
 
 class RadarPublisher(object):
-    def __init__(self, config=None, request_session=None):
+    def __init__(
+        self, config=None, request_session=None, access_token=None,
+        token_provider=None
+    ):
         self.config = config or toolkit.config
         self.requests = request_session or requests
+        if bool(access_token) == bool(token_provider):
+            raise RadarConfigError(
+                "RadarPublisher requires exactly one user access token or token provider"
+            )
+        self.access_token = access_token
+        self.token_provider = token_provider
         self.context_url = self._required("ckanext.dataset_transfer.radar.context_url").rstrip("/")
         self.workspace_id = self._required("ckanext.dataset_transfer.radar.workspace_id")
         self.schema_key = self._setting("ckanext.dataset_transfer.radar.schema_key", "RDDM")
@@ -129,40 +138,21 @@ class RadarPublisher(object):
             "Missing RADAR configuration: {}".format(key)
         )
 
-    def _access_token(self):
-        configured_token = self._setting("ckanext.dataset_transfer.radar.access_token")
-        if configured_token:
-            log.info("RADAR publish using configured access token")
-            return configured_token
-
-        token_url = self.context_url + "/api/tokens"
-        log.info("RADAR token request started url=%s", token_url)
-        token_payload = {
-            "clientId": self._required("ckanext.dataset_transfer.radar.client_id"),
-            "clientSecret": self._required("ckanext.dataset_transfer.radar.client_secret"),
-            "redirectUrl": self._required("ckanext.dataset_transfer.radar.redirect_url"),
-            "userName": self._required("ckanext.dataset_transfer.radar.user_name"),
-            "userPassword": self._required("ckanext.dataset_transfer.radar.user_password"),
-        }
-        try:
-            response = self.requests.post(token_url, json=token_payload, timeout=60)
-        except requests.RequestException as error:
-            log.exception("RADAR token request failed url=%s", token_url)
-            raise RadarPublishError("RADAR token request failed: {}".format(error))
-        # Token response bodies contain credentials and must never be logged.
-        log.info(
-            "RADAR token response status=%s url=%s",
-            getattr(response, "status_code", ""),
-            getattr(response, "url", ""),
-        )
-        self._raise_for_radar(response, "RADAR token request failed")
-        try:
-            token_json = response.json()
-        except ValueError as error:
-            raise RadarPublishError("RADAR token response was not valid JSON") from error
-        if not token_json.get("access_token"):
-            raise RadarPublishError("RADAR token response did not contain access_token")
-        return token_json["access_token"]
+    def _authorization_headers(self, extra=None):
+        if self.token_provider is not None:
+            if callable(self.token_provider):
+                access_token = self.token_provider()
+            else:
+                access_token = self.token_provider.get_valid_access_token()
+        else:
+            access_token = self.access_token
+        if not access_token:
+            raise RadarPublishError(
+                "Connect your RADAR4Ing account before publishing."
+            )
+        headers = {"Authorization": "Bearer {}".format(access_token)}
+        headers.update(extra or {})
+        return headers
 
     def publish_dataset(self, dataset, reviewed_metadata=None, transfer_state=None):
         log.info(
@@ -214,9 +204,6 @@ class RadarPublisher(object):
 
         # Authentication and dataset creation intentionally happen only after all
         # local semantic and XSD validation has passed.
-        access_token = self._access_token()
-        headers = {"Authorization": "Bearer {}".format(access_token)}
-
         transfer_state = transfer_state or {}
         resume_status = transfer_state.get("status")
         dataset_id = transfer_state.get("published_dataset_id")
@@ -229,7 +216,7 @@ class RadarPublisher(object):
                 resume_status,
             )
         else:
-            created_dataset = self._create_dataset(dataset, headers)
+            created_dataset = self._create_dataset(dataset)
             dataset_id = created_dataset["id"]
         log.info(
             "RADAR metadata XML generated package_id=%s bytes=%s xsd_path=%s",
@@ -243,12 +230,12 @@ class RadarPublisher(object):
             "resource_verification_failure",
         ):
             try:
-                self._upload_metadata(dataset_id, metadata_xml, headers)
+                self._upload_metadata(dataset_id, metadata_xml)
 
                 # RADAR removes the schema-valid placeholder identifier on upload. It must
                 # assign its DOI before validating the stored descriptive metadata.
-                doi = self._assign_doi(dataset_id, headers)
-                self._validate_uploaded_metadata(dataset_id, headers)
+                doi = self._assign_doi(dataset_id)
+                self._validate_uploaded_metadata(dataset_id)
             except RadarPublishError as error:
                 _add_transfer_context(
                     error, "metadata_upload_failure", dataset_id, doi
@@ -256,7 +243,7 @@ class RadarPublisher(object):
                 raise
         elif not doi:
             try:
-                doi = self._read_doi(dataset_id, headers)
+                doi = self._read_doi(dataset_id)
             except RadarPublishError as error:
                 _add_transfer_context(error, resume_status, dataset_id, doi)
                 raise
@@ -288,14 +275,14 @@ class RadarPublisher(object):
                 "resource_verification_failure",
             ):
                 try:
-                    self._upload_archive(dataset_id, archive, headers)
+                    self._upload_archive(dataset_id, archive)
                 except RadarPublishError as error:
                     _add_transfer_context(
                         error, "resource_upload_failure", dataset_id, doi
                     )
                     raise
             try:
-                self._verify_uploaded_resources(dataset_id, archive_entries, headers)
+                self._verify_uploaded_resources(dataset_id, archive_entries)
             except RadarPublishError as error:
                 if not error.status:
                     error.status = "resource_verification_failure"
@@ -323,7 +310,7 @@ class RadarPublisher(object):
             "published_dataset_id": dataset_id,
         }
 
-    def _create_dataset(self, dataset, headers):
+    def _create_dataset(self, dataset, headers=None):
         payload = {
             "id": None,
             "parentId": self.workspace_id,
@@ -349,9 +336,12 @@ class RadarPublisher(object):
             url,
         )
         try:
+            headers = self._authorization_headers(
+                {"Content-Type": "application/json"}
+            )
             response = self.requests.post(
                 url,
-                headers=dict(headers, **{"Content-Type": "application/json"}),
+                headers=headers,
                 json=payload,
                 timeout=120,
             )
@@ -371,7 +361,7 @@ class RadarPublisher(object):
         )
         return created
 
-    def _upload_metadata(self, dataset_id, metadata_xml, headers):
+    def _upload_metadata(self, dataset_id, metadata_xml, headers=None):
         url = self.context_url + "/api/datasets/{}/metadata".format(dataset_id)
         log.info(
             "RADAR metadata upload request dataset_id=%s url=%s bytes=%s",
@@ -380,6 +370,7 @@ class RadarPublisher(object):
             len(metadata_xml),
         )
         try:
+            headers = self._authorization_headers()
             response = self.requests.post(
                 url,
                 headers=headers,
@@ -399,10 +390,11 @@ class RadarPublisher(object):
         self._raise_for_radar(response, "RADAR metadata upload failed")
         log.info("RADAR metadata upload completed dataset_id=%s", dataset_id)
 
-    def _assign_doi(self, dataset_id, headers):
+    def _assign_doi(self, dataset_id, headers=None):
         url = self.context_url + "/api/datasets/{}/doi".format(dataset_id)
         log.info("RADAR DOI assignment request dataset_id=%s url=%s", dataset_id, url)
         try:
+            headers = self._authorization_headers()
             response = self.requests.post(url, headers=headers, timeout=120)
         except requests.RequestException as error:
             log.exception(
@@ -418,14 +410,15 @@ class RadarPublisher(object):
         if not _looks_like_doi(doi):
             # Some RADAR versions return an empty success body; retrieve the DOI
             # after the successful assignment rather than inventing one locally.
-            doi = self._read_doi(dataset_id, headers)
+            doi = self._read_doi(dataset_id)
         log.info("RADAR DOI assignment completed dataset_id=%s doi=%s", dataset_id, doi)
         return doi
 
-    def _validate_uploaded_metadata(self, dataset_id, headers):
+    def _validate_uploaded_metadata(self, dataset_id, headers=None):
         url = self.context_url + "/api/datasets/{}/metadata/validate".format(dataset_id)
         log.info("RADAR metadata validation request dataset_id=%s url=%s", dataset_id, url)
         try:
+            headers = self._authorization_headers()
             response = self.requests.get(url, headers=headers, timeout=120)
         except requests.RequestException as error:
             log.exception("RADAR metadata validation request failed dataset_id=%s url=%s", dataset_id, url)
@@ -458,10 +451,11 @@ class RadarPublisher(object):
             )
         log.info("RADAR metadata validation passed dataset_id=%s result=%s", dataset_id, validation_json)
 
-    def _upload_archive(self, dataset_id, archive, headers):
+    def _upload_archive(self, dataset_id, archive, headers=None):
         url = self.ingest_url + "/upload/{}/ingest".format(dataset_id)
         log.info("RADAR ingest upload request dataset_id=%s url=%s", dataset_id, url)
         try:
+            headers = self._authorization_headers()
             response = self.requests.post(
                 url,
                 headers=headers,
@@ -475,7 +469,7 @@ class RadarPublisher(object):
         self._raise_for_radar(response, "RADAR content ingest failed")
         log.info("RADAR ingest upload completed dataset_id=%s", dataset_id)
 
-    def _verify_uploaded_resources(self, dataset_id, expected_names, headers):
+    def _verify_uploaded_resources(self, dataset_id, expected_names, headers=None):
         url = self.context_url + "/api/datasets/{}/children".format(dataset_id)
         rows = 100
         expected = Counter(expected_names)
@@ -493,7 +487,7 @@ class RadarPublisher(object):
         while True:
             attempt += 1
             actual_names = self._read_uploaded_resource_names(
-                dataset_id, url, headers, rows
+                dataset_id, url, rows
             )
             actual = Counter(actual_names)
             missing = list((expected - actual).elements())
@@ -558,12 +552,13 @@ class RadarPublisher(object):
             )
             time.sleep(delay)
 
-    def _read_uploaded_resource_names(self, dataset_id, url, headers, rows):
+    def _read_uploaded_resource_names(self, dataset_id, url, rows, headers=None):
         offset = 0
         children = []
         total_hits = None
         while total_hits is None or offset < total_hits:
             try:
+                headers = self._authorization_headers()
                 response = self.requests.get(
                     url,
                     headers=headers,
@@ -620,10 +615,11 @@ class RadarPublisher(object):
             if name
         ]
 
-    def _read_doi(self, dataset_id, headers):
+    def _read_doi(self, dataset_id, headers=None):
         url = self.context_url + "/api/datasets/{}/doi".format(dataset_id)
         log.info("RADAR DOI lookup request dataset_id=%s url=%s", dataset_id, url)
         try:
+            headers = self._authorization_headers()
             response = self.requests.get(url, headers=headers, timeout=120)
         except requests.RequestException as error:
             log.exception("RADAR DOI lookup request failed dataset_id=%s url=%s", dataset_id, url)
@@ -638,6 +634,30 @@ class RadarPublisher(object):
     def _raise_for_radar(self, response, message):
         if 200 <= response.status_code < 300:
             return
+        if response.status_code == 401:
+            if self.token_provider is not None and hasattr(
+                self.token_provider, "mark_reauthentication_required"
+            ):
+                self.token_provider.mark_reauthentication_required()
+            raise RadarPublishError(
+                "Your RADAR4Ing authorization is no longer valid. Reconnect your account."
+            )
+        if response.status_code == 403:
+            raise RadarPublishError(
+                "Your RADAR4Ing account is connected, but you do not have permission "
+                "to upload datasets to the configured workspace. Please contact your "
+                "RADAR workspace administrator."
+            )
+        if response.status_code == 429:
+            raise RadarPublishError(
+                "RADAR4Ing is temporarily rate limiting requests. Please try again later."
+            )
+        if response.status_code >= 500:
+            raise RadarPublishError(
+                "RADAR4Ing is temporarily unavailable (HTTP {}).".format(
+                    response.status_code
+                )
+            )
         log.error(
             "%s status=%s url=%s body=%s",
             message,

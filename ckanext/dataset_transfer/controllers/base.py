@@ -9,8 +9,19 @@ from urllib.parse import urlparse
 
 import requests
 from ckanext.dataset_transfer.libs.helper import Helper
-from flask import Response, request, render_template
+from flask import (
+    Response,
+    current_app,
+    flash,
+    redirect,
+    request,
+    render_template,
+    session,
+)
+from flask_wtf.csrf import validate_csrf
+from wtforms.validators import ValidationError as CSRFValidationError
 import ckan.plugins.toolkit as toolkit
+from ckan.model import meta
 from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
 from ckanext.dataset_transfer.services.radar import (
@@ -28,6 +39,14 @@ from ckanext.dataset_transfer.services.radar_metadata_mapping import (
 )
 from ckanext.dataset_transfer.services.radar_reference_mapping import (
     get_ckan_reference_descriptions,
+)
+from ckanext.dataset_transfer.services.radar_oauth import (
+    RadarOAuthConfigError,
+    RadarOAuthError,
+    RadarOAuthService,
+    RadarOAuthStateError,
+    RadarOAuthTemporaryError,
+    RadarReauthenticationRequired,
 )
 from datetime import datetime as _time
 
@@ -269,6 +288,7 @@ class BaseController():
             dfg_award_number=award_number,
             reference_descriptions=get_ckan_reference_descriptions(package),
         )
+        radar_oauth = BaseController._radar_oauth_context(package)
         return render_template(
             'publish_page.html',
             pkg=package,
@@ -280,6 +300,195 @@ class BaseController():
             radar_policy_errors=fixed_radar_metadata_errors(
                 package, project_id, award_number
             ),
+            radar_oauth=radar_oauth,
+            selected_publish_target=(
+                "radar" if request.args.get("publish_target") == "radar" else ""
+            ),
+        )
+
+    @staticmethod
+    def _current_user_id():
+        user = getattr(toolkit.g, "userobj", None)
+        return getattr(user, "id", None)
+
+    @staticmethod
+    def _editable_dataset(dataset_name):
+        if not dataset_name:
+            toolkit.abort(400, "A dataset is required.")
+        package = toolkit.get_action("package_show")({}, {"id": dataset_name})
+        if not Helper.check_access_edit_package(package["id"]):
+            toolkit.abort(403, "Not Authorized")
+        return package
+
+    @staticmethod
+    def _validate_csrf_request():
+        field_name = getattr(toolkit.g, "csrf_field_name", "_csrf_token")
+        token = request.form.get(field_name) or request.form.get("_csrf_token")
+        try:
+            validate_csrf(token)
+        except CSRFValidationError:
+            toolkit.abort(400, "Invalid CSRF token")
+
+    @staticmethod
+    def _radar_oauth_context(package):
+        result = RadarOAuthService.configuration_status()
+        result.update({
+            "connected": False,
+            "requires_reauthentication": False,
+            "temporarily_unavailable": False,
+            "login_url": "",
+            "disconnect_url": "",
+        })
+        user_id = BaseController._current_user_id()
+        if not result["configured"] or not user_id:
+            return result
+        try:
+            service = RadarOAuthService()
+            result.update(service.connection_status(user_id))
+            result["login_url"] = toolkit.url_for(
+                "dataset_transfer.radar_login",
+                dataset_name=package["name"],
+            )
+            result["disconnect_url"] = toolkit.url_for(
+                "dataset_transfer.radar_disconnect"
+            )
+            if result.get("requires_reauthentication"):
+                result["message"] = (
+                    "Your RADAR4Ing connection has expired. Connect your account again."
+                )
+            elif result.get("temporarily_unavailable"):
+                result["message"] = (
+                    "RADAR4Ing authentication is temporarily unavailable. Try again later."
+                )
+        except RadarOAuthError:
+            result["connected"] = False
+            result["message"] = (
+                "RADAR4Ing authentication is temporarily unavailable. Try again later."
+            )
+        return result
+
+    @staticmethod
+    def radar_login():
+        user_id = BaseController._current_user_id()
+        if not user_id:
+            toolkit.abort(401, "Authentication required")
+        package = BaseController._editable_dataset(
+            request.args.get("dataset_name")
+        )
+        try:
+            service = RadarOAuthService()
+            authorization_url, session_binding = service.authorization_url(
+                user_id, package["name"]
+            )
+            meta.Session.commit()
+        except RadarOAuthConfigError:
+            toolkit.abort(503, "RADAR4Ing OAuth is not configured.")
+        session["dataset_transfer_radar_oauth_binding"] = session_binding
+        session.modified = True
+        return redirect(authorization_url)
+
+    @staticmethod
+    def radar_callback():
+        user_id = BaseController._current_user_id()
+        if not user_id:
+            toolkit.abort(401, "Authentication required")
+        session_binding = session.get("dataset_transfer_radar_oauth_binding")
+        try:
+            service = RadarOAuthService()
+            dataset_name = service.complete_authorization(
+                user_id=user_id,
+                state=request.args.get("state"),
+                session_binding=session_binding,
+                code=request.args.get("code"),
+                provider_error=request.args.get("error"),
+            )
+        except RadarOAuthStateError as error:
+            if error.flow_consumed:
+                meta.Session.commit()
+                session.pop("dataset_transfer_radar_oauth_binding", None)
+                session.modified = True
+            toolkit.abort(400, "RADAR OAuth state is invalid or expired.")
+        except RadarOAuthConfigError:
+            toolkit.abort(503, "RADAR4Ing OAuth is not configured.")
+        except RadarOAuthError as error:
+            if error.flow_consumed:
+                meta.Session.commit()
+                session.pop("dataset_transfer_radar_oauth_binding", None)
+                session.modified = True
+            if error.dataset_name:
+                package = BaseController._editable_dataset(error.dataset_name)
+                flash(str(error), "error")
+                return redirect(
+                    toolkit.url_for(
+                        "dataset_transfer.publish_page",
+                        dataset_name=package["name"],
+                        publish_target="radar",
+                    )
+                )
+            toolkit.abort(502, "RADAR authorization could not be completed.")
+        meta.Session.commit()
+        session.pop("dataset_transfer_radar_oauth_binding", None)
+        session.modified = True
+        package = BaseController._editable_dataset(dataset_name)
+        flash("Connected to RADAR4Ing.", "success")
+        return redirect(
+            toolkit.url_for(
+                "dataset_transfer.publish_page",
+                dataset_name=package["name"],
+                publish_target="radar",
+            )
+        )
+
+    @staticmethod
+    def radar_status():
+        user_id = BaseController._current_user_id()
+        if not user_id:
+            return BaseController._error_response(
+                "Authentication required", "Authentication required", 401
+            )
+        configuration = RadarOAuthService.configuration_status()
+        if not configuration["configured"]:
+            return BaseController._json_response({
+                "configured": False,
+                "connected": False,
+                "requires_reauthentication": False,
+            })
+        try:
+            status = RadarOAuthService().connection_status(user_id)
+        except RadarOAuthTemporaryError:
+            status = {
+                "connected": False,
+                "requires_reauthentication": False,
+                "temporarily_unavailable": True,
+            }
+        status["configured"] = True
+        return BaseController._json_response(status)
+
+    @staticmethod
+    def radar_disconnect():
+        BaseController._validate_csrf_request()
+        user_id = BaseController._current_user_id()
+        if not user_id:
+            return BaseController._error_response(
+                "Authentication required", "Authentication required", 401
+            )
+        package = BaseController._editable_dataset(
+            request.form.get("dataset_name")
+        )
+        try:
+            RadarOAuthService().disconnect(user_id)
+            meta.Session.commit()
+        except RadarOAuthConfigError:
+            toolkit.abort(503, "RADAR4Ing OAuth is not configured.")
+        session.pop("dataset_transfer_radar_oauth_binding", None)
+        session.modified = True
+        flash("Disconnected from RADAR4Ing.", "success")
+        return redirect(
+            toolkit.url_for(
+                "dataset_transfer.publish_page",
+                dataset_name=package["name"],
+                publish_target="radar",
+            )
         )
 
     @staticmethod
@@ -661,6 +870,32 @@ class BaseController():
     @staticmethod
     def _publish_to_radar(dataset, incomplete_radar_transfer=None):
         """Validate reviewed metadata and continue through the RADAR publisher."""
+        user_id = BaseController._current_user_id()
+        if not user_id:
+            return BaseController._error_response(
+                "RADAR connection required",
+                "Connect your RADAR4Ing account before publishing.",
+                401,
+                reconnect_required=True,
+            )
+        try:
+            oauth_service = RadarOAuthService()
+            connection = oauth_service.connection_status(
+                user_id, refresh_if_needed=False
+            )
+        except RadarOAuthConfigError:
+            return BaseController._error_response(
+                "RADAR configuration missing",
+                "RADAR4Ing OAuth is not configured on this CKAN instance.",
+                503,
+            )
+        if not connection.get("connected"):
+            return BaseController._error_response(
+                "RADAR connection required",
+                "Connect your RADAR4Ing account before publishing.",
+                401,
+                reconnect_required=True,
+            )
         reviewed_metadata = normalize_reviewed_metadata(
             request.form.get("radar_metadata")
         )
@@ -702,10 +937,32 @@ class BaseController():
                     incomplete_radar_transfer.published_dataset_id
                 )
                 transfer_state["doi"] = incomplete_radar_transfer.doi or ""
-            radar_result = RadarPublisher().publish_dataset(
+            radar_result = RadarPublisher(
+                token_provider=oauth_service.token_provider(user_id)
+            ).publish_dataset(
                 dataset,
                 validation["metadata"],
                 transfer_state=transfer_state,
+            )
+        except RadarReauthenticationRequired as error:
+            return BaseController._error_response(
+                "RADAR connection required",
+                str(error),
+                401,
+                reconnect_required=True,
+            )
+        except RadarOAuthTemporaryError:
+            return BaseController._error_response(
+                "RADAR authentication unavailable",
+                "RADAR4Ing authentication is temporarily unavailable. Try again later.",
+                503,
+            )
+        except RadarOAuthError:
+            return BaseController._error_response(
+                "RADAR authentication failed",
+                "RADAR4Ing authentication failed. Reconnect your account.",
+                502,
+                reconnect_required=True,
             )
         except RadarConfigError as error:
             log.exception(

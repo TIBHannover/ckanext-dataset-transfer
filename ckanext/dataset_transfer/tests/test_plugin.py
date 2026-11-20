@@ -56,6 +56,40 @@ def dataset_transfer_migrated_db(clean_db):
 
 
 @pytest.fixture
+def radar_oauth_config(monkeypatch):
+    import ckan.plugins.toolkit as toolkit
+    from cryptography.fernet import Fernet
+
+    values = {
+        "ckanext.dataset_transfer.radar.oauth_environment": "test",
+        "ckanext.dataset_transfer.radar.oauth_authorize_url": (
+            "https://test.radar-service.eu/radar-backend/oauth/authorize"
+        ),
+        "ckanext.dataset_transfer.radar.oauth_token_url": (
+            "https://test.radar-service.eu/radar-backend/oauth/token"
+        ),
+        "ckanext.dataset_transfer.radar.oauth_refresh_url": (
+            "https://test.radar-service.eu/radar/api/tokens/refresh"
+        ),
+        "ckanext.dataset_transfer.radar.oauth_callback_url": (
+            "https://ckan.example.test/dataset_transfer/radar/callback"
+        ),
+        "ckanext.dataset_transfer.radar.oauth_refresh_mode": "radar_api",
+        "ckanext.dataset_transfer.radar.oauth_token_encryption_key": (
+            Fernet.generate_key().decode("ascii")
+        ),
+        "ckanext.dataset_transfer.radar.client_id": "test-client",
+        "ckanext.dataset_transfer.radar.client_secret": "test-secret",
+        "ckanext.dataset_transfer.radar.context_url": (
+            "https://test.radar-service.eu/radar"
+        ),
+    }
+    for key, value in values.items():
+        monkeypatch.setitem(toolkit.config, key, value)
+    return values
+
+
+@pytest.fixture
 def csrf_enforced_app(app):
     flask_app = app.flask_app
     csrf = flask_app.extensions["csrf"]
@@ -1551,7 +1585,9 @@ def test_remote_dataset_is_reconciled_when_initial_local_save_failed(
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
-def test_publish_dataset_to_radar_uses_server_credentials(app, monkeypatch, tmp_path):
+def test_publish_dataset_to_radar_uses_current_users_oauth_token(
+    app, monkeypatch, tmp_path, radar_oauth_config
+):
     import ckan.plugins.toolkit as toolkit
     import ckan.tests.factories as factories
     from ckanext.dataset_transfer.controllers import base
@@ -1590,12 +1626,18 @@ def test_publish_dataset_to_radar_uses_server_credentials(app, monkeypatch, tmp_
         ("ckanext.dataset_transfer.radar.context_url", "https://test.radar-service.eu/radar"),
         ("ckanext.dataset_transfer.radar.workspace_id", "workspace-id"),
         ("ckanext.dataset_transfer.radar.responsible_email", "data@example.test"),
-        ("ckanext.dataset_transfer.radar.access_token", "radar-access-token"),
         ("ckanext.dataset_transfer.radar.publisher", "Leibniz University Hannover"),
         ("ckanext.crc.project.id", "TRR375"),
         ("ckanext.dataset_transfer.radar.dfg_award_number", "511148852"),
     ):
         monkeypatch.setitem(toolkit.config, key, value)
+    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
+
+    RadarOAuthService()._save_token_response(user["id"], {
+        "access_token": "radar-access-token",
+        "refresh_token": "radar-refresh-token",
+        "expires_in": 3600,
+    })
     monkeypatch.setattr(base.Helper, "check_access_edit_package", lambda package_id: True)
     monkeypatch.setattr(
         base.toolkit,

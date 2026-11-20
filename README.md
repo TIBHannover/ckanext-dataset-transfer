@@ -131,17 +131,107 @@ identifier in the existing `published_dataset_id` column. Older unmarked rows
 are displayed as legacy transfers with an unknown destination; their target is
 not guessed from DOI prefixes or URLs.
 
-For local testing, either provide a temporary RADAR access token:
+### User-specific RADAR OAuth authentication
 
-    ckanext.dataset_transfer.radar.access_token = YOUR_ACCESS_TOKEN
+RADAR publishing uses the OAuth 2.0 Authorization Code flow. CKAN identifies
+itself to RADAR with its confidential client ID and client secret. Each
+researcher signs in directly at RADAR; CKAN never receives or stores the
+researcher's RADAR password. Access and refresh tokens are encrypted in the
+CKAN database and isolated by CKAN user and RADAR environment.
 
-Or provide the OAuth credentials so the extension can request a token:
+Run the extension migration before enabling OAuth:
 
-    ckanext.dataset_transfer.radar.client_id = tib
+    ckan -c /etc/ckan/default/ckan.ini db upgrade -p dataset_transfer
+
+Generate a dedicated Fernet encryption key and store it in the deployment's
+secret manager, never in Git:
+
+    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+Configure the RADAR test client with the exact values registered by the RADAR
+administrator:
+
+    ckanext.dataset_transfer.radar.oauth_environment = test
+    ckanext.dataset_transfer.radar.oauth_authorize_url = https://test.radar-service.eu/radar-backend/oauth/authorize
+    ckanext.dataset_transfer.radar.oauth_token_url = https://test.radar-service.eu/radar-backend/oauth/token
+    ckanext.dataset_transfer.radar.oauth_refresh_url = https://test.radar-service.eu/radar/api/tokens/refresh
+    ckanext.dataset_transfer.radar.oauth_callback_url = https://YOUR-CKAN-HOST/YOUR-ROOT-PATH/dataset_transfer/radar/callback
+    ckanext.dataset_transfer.radar.client_id = YOUR_CLIENT_ID
     ckanext.dataset_transfer.radar.client_secret = YOUR_CLIENT_SECRET
-    ckanext.dataset_transfer.radar.redirect_url = https://www.tib.eu
-    ckanext.dataset_transfer.radar.user_name = YOUR_RADAR_USERNAME
-    ckanext.dataset_transfer.radar.user_password = YOUR_RADAR_PASSWORD
+    ckanext.dataset_transfer.radar.oauth_token_encryption_key = YOUR_FERNET_KEY
+
+The callback value must exactly match the externally visible HTTPS URL
+registered at RADAR, including a CKAN deployment root path when present. The
+extension does not construct or accept arbitrary callback URLs at runtime.
+Configure the reverse proxy to avoid recording the callback query string in
+access logs because it contains the short-lived authorization code.
+
+RADAR has supplied two possible refresh protocols. Confirm which one applies
+to the registered Authorization Code client and configure exactly one:
+
+    # RADAR JSON refresh endpoint
+    ckanext.dataset_transfer.radar.oauth_refresh_mode = radar_api
+
+or:
+
+    # Standard refresh_token grant at the OAuth token endpoint
+    ckanext.dataset_transfer.radar.oauth_refresh_mode = oauth_token
+
+S256 PKCE support is not advertised through a discovery document on the RADAR
+test system. It is implemented but disabled by default. Enable it only after
+RADAR confirms support for the registered client:
+
+    ckanext.dataset_transfer.radar.oauth_pkce_enabled = true
+
+Optional security and timeout settings are:
+
+    ckanext.dataset_transfer.radar.oauth_state_ttl = 600
+    ckanext.dataset_transfer.radar.oauth_timeout = 30
+    ckanext.dataset_transfer.radar.oauth_refresh_margin = 300
+
+Docker deployments can use the upper-case, underscore-separated equivalents,
+for example `CKANEXT_DATASET_TRANSFER_RADAR_OAUTH_AUTHORIZE_URL` and
+`CKANEXT_DATASET_TRANSFER_RADAR_OAUTH_TOKEN_ENCRYPTION_KEY`.
+
+Researchers select RADAR4Ing on the publication page and choose **Connect to
+RADAR4Ing**. After RADAR redirects back to CKAN, the existing metadata review,
+consent, confirmation, upload, reconciliation, and duplicate-protection flow
+continues unchanged. The connected RADAR user must have curator or subcurator
+access to `ckanext.dataset_transfer.radar.workspace_id`. A RADAR HTTP 403 is
+reported as a workspace-permission error; roles are never assigned or bypassed
+by CKAN.
+
+The **Disconnect** action deletes only the current CKAN user's encrypted token
+record for the configured RADAR environment. Existing publication records and
+remote datasets are not changed. Disconnect does not currently call a RADAR
+revocation endpoint because none was supplied for this integration.
+
+The former shared settings are intentionally unsupported for publication:
+
+    ckanext.dataset_transfer.radar.access_token
+    ckanext.dataset_transfer.radar.redirect_url
+    ckanext.dataset_transfer.radar.user_name
+    ckanext.dataset_transfer.radar.user_password
+
+Remove those values only after the test OAuth client, callback, workspace
+permissions, refresh behavior, resource upload, and incomplete-transfer
+recovery have been verified. Their presence does not provide a fallback.
+
+Common connection failures:
+
+* **OAuth not configured**: verify every endpoint, client secret, callback URL,
+  environment, refresh mode, and encryption key.
+* **Invalid or expired state**: start Connect again; states are single-use and
+  expire after ten minutes by default.
+* **Reconnect required**: the refresh token was absent, revoked, unreadable, or
+  rejected by RADAR.
+* **Workspace permission denied**: ask the RADAR workspace administrator to
+  grant the connected researcher the required role.
+* **Environment mismatch**: test tokens and endpoints cannot be combined with
+  production API endpoints.
+
+Automated tests mock all OAuth and RADAR responses. They do not require real
+credentials and do not publish datasets.
 
 The generated descriptive metadata XML is validated locally against the bundled
 RADAR v9.3 descriptive schema, uploaded to RADAR, and then checked with RADAR's
