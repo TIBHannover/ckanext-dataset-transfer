@@ -6,19 +6,16 @@
   <input type="hidden" id="publish_url" value="{{ h.url_for('dataset_transfer.publish', _external=True) }}">
   <input type="hidden" id="check_api_token" value="{{ h.url_for('dataset_transfer.user_has_api_token', _external=True) }}">
   <input type="hidden" id="package_id" value="{{ pkg_dict.id }}">
-  <div id="publish_destination_selection"
-       data-radar-transferred="{{ 'true' if transfer_status.radar else 'false' }}"
-       data-radar-connected="{{ 'true' if radar_oauth.connected else 'false' }}"
-       data-radar-configured="{{ 'true' if radar_oauth.configured else 'false' }}">
+  <div id="publish_destination_selection" data-radar-transferred="{{ 'true' if transfer_status.radar else 'false' }}">
     <div class="row"><h2 class="modal-title">{{ _('Publish the dataset') }} <span id="publish_page_dataset_name_in_title">{{ pkg_dict.title }}</span></h2></div>
     <div class="publish-numbered-section">
 
       <div class="publish-step-content">
         <h3 class="publish-section-heading"><label for="publish_target">{{ _('Publish target') }}</label></h3>
         <select class="form-control" id="publish_target" name="publish_target">
-          <option value=""{% if not selected_publish_target %} selected{% endif %}>{{ _('Select a publish target') }}</option>
+          <option value="" selected>{{ _('Select a publish target') }}</option>
           <option value="luh">{{ _('LUH data repository') }}</option>
-          <option value="radar"{% if selected_publish_target == 'radar' %} selected{% endif %}>{{ _('RADAR4Ing') }}</option>
+          <option value="radar">{{ _('RADAR4Ing') }}</option>
         </select>
         <p class="help-block" id="publish_target_description"
            data-initial="{{ _('Choose where to publish the dataset. The requirements of the chosen repository appear below.') }}"
@@ -27,7 +24,7 @@
       </div>
     </div>
   </div>
-  {% snippet "snippets/dataset_publish_section1.html", stored_api_token=stored_api_token, transfer_status=transfer_status, radar_oauth=radar_oauth, pkg_dict=pkg_dict %}
+  {% snippet "snippets/dataset_publish_section1.html", stored_api_token=stored_api_token, transfer_status=transfer_status %}
   {% snippet "snippets/radar_metadata_review.html", radar_metadata=radar_metadata, radar_vocabularies=radar_vocabularies, radar_policy_errors=radar_policy_errors %}
   {% snippet "snippets/dataset_publish_section2.html" %}
   {% snippet "snippets/dataset_publish_section3.html", pkg_dict=pkg_dict %}

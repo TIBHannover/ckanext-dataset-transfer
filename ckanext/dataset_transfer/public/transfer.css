@@ -385,27 +385,6 @@
   padding: 8px 10px;
 }
 
-.publish-radar-connection {
-  border-top: 1px solid #ddd;
-  padding-top: 4px;
-}
-
-.publish-radar-connection h3 {
-  margin-bottom: 8px;
-}
-
-.radar-disconnect-form {
-  display: inline-block;
-}
-
-.radar-disconnect-form .btn-link {
-  padding-left: 0;
-}
-
-.radar-connection-message {
-  margin-bottom: 12px;
-}
-
 @media (max-width: 767px) {
   #publish_radar_metadata_step .radar-section-nav {
     display: block;

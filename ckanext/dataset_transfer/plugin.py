@@ -53,34 +53,6 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
             methods=['GET']
             )
 
-        blueprint.add_url_rule(
-            u'/dataset_transfer/radar/login',
-            u'radar_login',
-            BaseController.radar_login,
-            methods=['GET']
-            )
-
-        blueprint.add_url_rule(
-            u'/dataset_transfer/radar/callback',
-            u'radar_callback',
-            BaseController.radar_callback,
-            methods=['GET']
-            )
-
-        blueprint.add_url_rule(
-            u'/dataset_transfer/radar/status',
-            u'radar_status',
-            BaseController.radar_status,
-            methods=['GET']
-            )
-
-        blueprint.add_url_rule(
-            u'/dataset_transfer/radar/disconnect',
-            u'radar_disconnect',
-            BaseController.radar_disconnect,
-            methods=['POST']
-            )
-
         return blueprint
 
 

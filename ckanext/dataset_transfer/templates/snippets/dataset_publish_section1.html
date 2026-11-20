@@ -46,30 +46,5 @@
         <div><h3>{{ _('Already transferred') }}</h3><p>{{ _('This dataset is already in RADAR4Ing.') }}{% if transfer_status.radar and transfer_status.radar.published_url %} <a href="{{ transfer_status.radar.published_url }}" target="_blank" rel="noopener">{{ _('View existing transfer') }}</a>{% endif %}</p></div>
       </div>
     </div>
-    <div class="publish-numbered-section radar-only" id="radar_oauth_section">
-      <div class="publish-step-content publish-radar-connection">
-        {% if radar_oauth.connected %}
-          <h3>{{ _('RADAR4Ing authorization successful') }}</h3>
-          <p>{{ _('You can now continue reviewing and publishing this dataset. This authorization applies only to the current dataset publication.') }}</p>
-          <form method="post" action="{{ radar_oauth.disconnect_url }}" class="radar-disconnect-form">
-            {{ h.csrf_input() }}
-            <input type="hidden" name="dataset_name" value="{{ pkg_dict.name }}">
-            <button type="submit" class="btn btn-link btn-sm">{{ _('Disconnect') }}</button>
-          </form>
-          <form method="post" action="{{ radar_oauth.disconnect_url }}" id="radar_cancel_disconnect_form" hidden>
-            {{ h.csrf_input() }}
-            <input type="hidden" name="dataset_name" value="{{ pkg_dict.name }}">
-            <input type="hidden" name="disconnect_action" value="cancel">
-          </form>
-        {% else %}
-          <h3>{{ _('Connect your RADAR4Ing account') }}</h3>
-          <p>{{ _('Sign in with your RADAR4Ing account to authorize this dataset transfer. You must have permission to upload datasets to the selected RADAR4Ing workspace.') }}</p>
-          {% if radar_oauth.message %}<p class="help-block radar-connection-message">{{ radar_oauth.message }}</p>{% endif %}
-          {% if radar_oauth.configured and radar_oauth.login_url %}
-            <a class="btn btn-primary" id="radar_oauth_connect" href="{{ radar_oauth.login_url }}">{{ _('Connect to RADAR4Ing') }}</a>
-          {% endif %}
-        {% endif %}
-      </div>
-    </div>
   </div>
 </section>

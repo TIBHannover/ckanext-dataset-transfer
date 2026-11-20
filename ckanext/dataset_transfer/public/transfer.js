@@ -36,14 +36,6 @@ const radarSupportedRights = [
 ];
 
 $(document).ready(function(){
-    $('#dataset_transfer_cancel_btn').on('click', function(event){
-        if($('#publish_destination_selection').data('radar-connected') === true &&
-                $('#radar_cancel_disconnect_form').length){
-            event.preventDefault();
-            $('#radar_cancel_disconnect_form').trigger('submit');
-        }
-    });
-    
     update_publish_target_fields();
 
     /**
@@ -53,10 +45,6 @@ $(document).ready(function(){
         let step = $(this).attr("step");
         if( step === "2"){
             if($('#publish_target').val() === "radar"){
-                if($('#publish_destination_selection').data('radar-connected') !== true){
-                    $('#radar_oauth_section').attr('tabindex', '-1').trigger('focus');
-                    return;
-                }
                 $('#publish_destination_selection').hide();
                 $('#publish_step1').hide();
                 $('#publish_radar_metadata_step').show();
@@ -424,9 +412,6 @@ function update_publish_target_fields(){
         $('#dataset_transfer_next_btn').text('Continue');
         if($('#publish_destination_selection').data('radar-transferred') === true){
             $('#dataset_transfer_next_btn').prop('disabled', true).text('Publish');
-        }
-        else if($('#publish_destination_selection').data('radar-connected') !== true){
-            $('#dataset_transfer_next_btn').prop('disabled', true).text('Continue');
         }
     }
     else{

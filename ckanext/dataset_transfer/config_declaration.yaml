@@ -8,45 +8,9 @@ groups:
         description: Destination CKAN action API base URL, ending in /api/3/action/. Defaults to the original LUH repository.
       - key: ckanext.dataset_transfer.target_public_url
         description: Public base URL used to construct destination dataset links. Defaults to the original LUH repository.
-  - annotation: RADAR4Ing publication and OAuth settings
+  - annotation: RADAR4Ing publication settings
     options:
       - key: ckanext.dataset_transfer.radar.context_url
         description: HTTPS base URL for the RADAR API environment.
       - key: ckanext.dataset_transfer.radar.workspace_id
-        description: RADAR workspace that authenticated researchers must be allowed to use.
-      - key: ckanext.dataset_transfer.radar.client_id
-        description: Confidential OAuth client identifier registered for this CKAN deployment.
-      - key: ckanext.dataset_transfer.radar.client_secret
-        description: Confidential OAuth client secret. Keep this server-side and outside version control.
-      - key: ckanext.dataset_transfer.radar.oauth_environment
-        description: Environment identifier stored with each connection, normally test or production.
-      - key: ckanext.dataset_transfer.radar.oauth_authorize_url
-        description: Exact HTTPS OAuth authorization endpoint supplied by RADAR.
-      - key: ckanext.dataset_transfer.radar.oauth_token_url
-        description: Exact HTTPS OAuth token endpoint supplied by RADAR.
-      - key: ckanext.dataset_transfer.radar.oauth_refresh_url
-        description: Exact HTTPS refresh endpoint supplied by RADAR.
-      - key: ckanext.dataset_transfer.radar.oauth_callback_url
-        description: Exact externally visible CKAN callback URL registered with RADAR.
-      - key: ckanext.dataset_transfer.radar.oauth_refresh_mode
-        description: Refresh protocol confirmed for the registered client; radar_api or oauth_token.
-      - key: ckanext.dataset_transfer.radar.oauth_pkce_enabled
-        description: Enable S256 PKCE only after RADAR confirms support for the registered client.
-        default: false
-      - key: ckanext.dataset_transfer.radar.oauth_token_encryption_key
-        description: Server-only Fernet key used to encrypt per-user RADAR tokens at rest.
-      - key: ckanext.dataset_transfer.radar.oauth_state_ttl
-        description: Maximum OAuth state lifetime in seconds.
-        default: 600
-      - key: ckanext.dataset_transfer.radar.oauth_attempt_ttl
-        description: Lifetime in seconds for one dataset-specific RADAR authorization while metadata is reviewed.
-        default: 3600
-      - key: ckanext.dataset_transfer.radar.oauth_active_attempt_ttl
-        description: Bounded lease in seconds for an already claimed, active RADAR publication.
-        default: 7200
-      - key: ckanext.dataset_transfer.radar.oauth_timeout
-        description: OAuth token request timeout in seconds.
-        default: 30
-      - key: ckanext.dataset_transfer.radar.oauth_refresh_margin
-        description: Refresh an access token this many seconds before expiration.
-        default: 300
+        description: RADAR workspace used for publication once a supported server-side authentication provider is configured.

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import pytest
 import requests
@@ -53,40 +53,6 @@ def dataset_transfer_migrated_db(clean_db):
         plugins.load("dataset_transfer")
 
     db._run_migrations("dataset_transfer", None, True)
-
-
-@pytest.fixture
-def radar_oauth_config(monkeypatch):
-    import ckan.plugins.toolkit as toolkit
-    from cryptography.fernet import Fernet
-
-    values = {
-        "ckanext.dataset_transfer.radar.oauth_environment": "test",
-        "ckanext.dataset_transfer.radar.oauth_authorize_url": (
-            "https://test.radar-service.eu/radar-backend/oauth/authorize"
-        ),
-        "ckanext.dataset_transfer.radar.oauth_token_url": (
-            "https://test.radar-service.eu/radar-backend/oauth/token"
-        ),
-        "ckanext.dataset_transfer.radar.oauth_refresh_url": (
-            "https://test.radar-service.eu/radar/api/tokens/refresh"
-        ),
-        "ckanext.dataset_transfer.radar.oauth_callback_url": (
-            "https://ckan.example.test/dataset_transfer/radar/callback"
-        ),
-        "ckanext.dataset_transfer.radar.oauth_refresh_mode": "radar_api",
-        "ckanext.dataset_transfer.radar.oauth_token_encryption_key": (
-            Fernet.generate_key().decode("ascii")
-        ),
-        "ckanext.dataset_transfer.radar.client_id": "test-client",
-        "ckanext.dataset_transfer.radar.client_secret": "test-secret",
-        "ckanext.dataset_transfer.radar.context_url": (
-            "https://test.radar-service.eu/radar"
-        ),
-    }
-    for key, value in values.items():
-        monkeypatch.setitem(toolkit.config, key, value)
-    return values
 
 
 @pytest.fixture
@@ -309,6 +275,8 @@ def test_database_migration_initializes_tables(dataset_transfer_migrated_db):
 
     assert inspector.has_table("published_dataset")
     assert inspector.has_table("publish_api_token")
+    assert not inspector.has_table("radar_oauth_token")
+    assert not inspector.has_table("radar_oauth_state")
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
@@ -338,6 +306,23 @@ def test_publish_page_renders_for_editor(app):
     assert "LUH data repository" in _body(response)
     assert "RADAR4Ing" in _body(response)
     assert 'id="publish_target_details" hidden' in _body(response)
+    assert "Connect to RADAR4Ing" not in _body(response)
+    assert "RADAR4Ing authorization successful" not in _body(response)
+    assert "Disconnect" not in _body(response)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/dataset_transfer/radar/login",
+        "/dataset_transfer/radar/callback",
+        "/dataset_transfer/radar/status",
+        "/dataset_transfer/radar/disconnect",
+    ],
+)
+def test_removed_radar_oauth_routes_are_not_available(app, path):
+    response = app.get(path)
+    assert response.status_code == 404
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
@@ -451,6 +436,8 @@ def test_radar_review_javascript_preserves_submission_contract_and_dynamic_rows(
     assert "radar-organization-search" in source
     assert 'class="fa fa-trash"' in source
     assert "$('#radar_language').select2" in source
+    assert "radar-connected" not in source
+    assert "radar_oauth" not in source
     assert "Rights holder is the same as publisher" in template
     assert "<label>{{ _('Scheme URI') }}</label>" not in template
     assert publish_page.index("dataset_transfer_cancel_btn") < publish_page.index(
@@ -1686,21 +1673,14 @@ def test_remote_dataset_is_reconciled_when_initial_local_save_failed(
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
-@pytest.mark.parametrize("destination_failure", [False, True])
-def test_publish_dataset_to_radar_uses_current_users_oauth_token(
-    app, monkeypatch, tmp_path, radar_oauth_config, destination_failure
+def test_publish_dataset_to_radar_fails_closed_without_authentication(
+    app, monkeypatch
 ):
     import ckan.plugins.toolkit as toolkit
     import ckan.tests.factories as factories
     from ckanext.dataset_transfer.controllers import base
-    from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
 
     user = factories.SysadminWithToken()
-    storage_path = tmp_path / "ckan-storage"
-    upload_id = "fedcba1234567890fedcba1234567890"
-    upload_dir = storage_path / "resources" / upload_id[:3] / upload_id[3:6]
-    upload_dir.mkdir(parents=True)
-    (upload_dir / upload_id[6:]).write_bytes(b"radar resource data")
     dataset = {
         "id": "local-radar-dataset-id",
         "name": "local-radar-dataset",
@@ -1712,19 +1692,9 @@ def test_publish_dataset_to_radar_uses_current_users_oauth_token(
         "metadata_created": "2026-01-15T12:00:00",
         "organization": {"title": "Leibniz University Hannover"},
         "tags": [{"name": "radar"}],
-        "resources": [{
-            "id": upload_id,
-            "name": "radar-upload.txt",
-            "url": "radar-upload.txt",
-            "url_type": "upload",
-        }],
+        "resources": [],
     }
-    calls = []
-    original_get = requests.get
-
     for key, value in (
-        ("ckan.storage_path", str(storage_path)),
-        ("ckan.site_url", "https://ckan.example.test"),
         ("ckanext.dataset_transfer.radar.context_url", "https://test.radar-service.eu/radar"),
         ("ckanext.dataset_transfer.radar.workspace_id", "workspace-id"),
         ("ckanext.dataset_transfer.radar.responsible_email", "data@example.test"),
@@ -1733,14 +1703,6 @@ def test_publish_dataset_to_radar_uses_current_users_oauth_token(
         ("ckanext.dataset_transfer.radar.dfg_award_number", "511148852"),
     ):
         monkeypatch.setitem(toolkit.config, key, value)
-    from ckanext.dataset_transfer.services.radar_oauth import RadarOAuthService
-
-    oauth_service = RadarOAuthService()
-    existing_keys = list(oauth_service.redis.scan_iter(
-        RadarOAuthService.KEY_PREFIX + ":*"
-    ))
-    if existing_keys:
-        oauth_service.redis.delete(*existing_keys)
     monkeypatch.setattr(base.Helper, "check_access_edit_package", lambda package_id: True)
     monkeypatch.setattr(
         base.toolkit,
@@ -1752,78 +1714,15 @@ def test_publish_dataset_to_radar_uses_current_users_oauth_token(
         ),
     )
 
-    def fake_post(url, headers=None, json=None, files=None, **kwargs):
-        calls.append(("POST", url))
-        if url.endswith("/api/workspaces/workspace-id/datasets"):
-            assert headers["Authorization"] == "Bearer radar-access-token"
-            if destination_failure:
-                return FakeResponse(503, {"message": "temporarily unavailable"})
-            return FakeResponse(200, {"id": "radar-dataset-id"})
-        if url.endswith("/api/datasets/radar-dataset-id/metadata"):
-            assert b"Local RADAR Dataset" in files["metadataFile"][1]
-            return FakeResponse(200, {"success": True})
-        if url.endswith("/api/datasets/radar-dataset-id/doi"):
-            return FakeResponse(200, {"doi": "10.123/radar"})
-        if url.endswith("/radar-ingest/upload/radar-dataset-id/ingest"):
-            assert files["file"][1].getvalue()
-            return FakeResponse(200, {"success": True})
-        pytest.fail("Unexpected RADAR post: {}".format(url))
-
-    def fake_get(url, headers=None, **kwargs):
-        if urlparse(url).hostname in {"solr", "localhost", "127.0.0.1", "ckan"}:
-            return original_get(url, headers=headers, **kwargs)
-        calls.append(("GET", url))
-        if url.endswith("/api/datasets/radar-dataset-id/metadata/validate"):
-            return FakeResponse(200, {"valid": True})
-        if url.endswith("/api/datasets/radar-dataset-id/children"):
-            return FakeResponse(200, {
-                "data": [{"fileName": "radar-upload.txt"}], "totalHits": 1
-            })
-        pytest.fail("Unexpected RADAR get: {}".format(url))
-
-    monkeypatch.setattr(base.requests, "post", fake_post)
-    monkeypatch.setattr(base.requests, "get", fake_get)
     reviewed_metadata = base.map_ckan_to_radar(
         dataset,
         "Leibniz University Hannover",
         project_id="TRR375",
         dfg_award_number="511148852",
     )
-
-    from ckanext.dataset_transfer.services import radar_oauth
-
-    client = app.test_client()
-    login = client.get(
-        "/dataset_transfer/radar/login?dataset_name={}".format(dataset["name"]),
-        headers=_auth_headers(user),
-        status=302,
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(login.location).query)["state"][0]
-    monkeypatch.setattr(
-        radar_oauth.requests,
-        "post",
-        lambda *args, **kwargs: FakeResponse(200, {
-            "access_token": "radar-access-token",
-            "refresh_token": "radar-refresh-token",
-            "expires_in": 3600,
-        }),
-    )
-    client.get(
-        "/dataset_transfer/radar/callback?code=code&state={}".format(state),
-        headers=_auth_headers(user),
-        status=302,
-        follow_redirects=False,
-    )
-    attempt_keys = list(oauth_service.redis.scan_iter(
-        RadarOAuthService.KEY_PREFIX + ":test:attempt:*"
-    ))
-    assert len(attempt_keys) == 1
-    monkeypatch.setattr(base.requests, "post", fake_post)
-    monkeypatch.setattr(base.requests, "get", fake_get)
-    response = client.post(
+    response = app.post(
         "/dataset_transfer/publish",
-        data={
+        params={
             "package_id": dataset["id"],
             "publish_target": "radar",
             "radar_metadata": json.dumps(reviewed_metadata),
@@ -1833,18 +1732,48 @@ def test_publish_dataset_to_radar_uses_current_users_oauth_token(
         headers=_auth_headers(user),
     )
 
-    assert not oauth_service.redis.exists(attempt_keys[0])
-    assert not any("data.uni-hannover.de" in url for _, url in calls)
-    if destination_failure:
-        assert response.status_code == 502, response.json
-        assert PublishedDataset.get_by_dataset(dataset["id"]) is False
-        return
+    assert response.status_code == 503
+    assert response.json["error"] == "RADAR authentication not configured"
+    assert "server-side access token or token provider" in response.json["message"]
 
-    assert response.status_code == 200, response.json
-    assert response.json["published_dataset_id"] == "radar-dataset-id"
-    publication = PublishedDataset.get_by_dataset(dataset["id"])
-    assert PublishedDataset.decode_target_id(publication.published_dataset_id) == (
-        "radar", "radar-dataset-id"
+
+def test_radar_publisher_requires_explicit_server_side_authentication():
+    from ckanext.dataset_transfer.services.radar import (
+        RadarConfigError,
+        RadarPublisher,
+    )
+
+    config = {
+        "ckanext.dataset_transfer.radar.context_url": (
+            "https://test.radar-service.eu/radar"
+        ),
+        "ckanext.dataset_transfer.radar.workspace_id": "workspace-id",
+        "ckanext.dataset_transfer.radar.responsible_email": "data@example.test",
+        # A legacy shared token must never be discovered implicitly.
+        "ckanext.dataset_transfer.radar.access_token": "legacy-shared-token",
+    }
+    with pytest.raises(RadarConfigError, match="authentication is not configured"):
+        RadarPublisher(config=config)
+
+    class ExplicitTokenRequests(object):
+        def __init__(self):
+            self.calls = []
+
+        def post(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return FakeResponse(200, {"id": "remote-dataset-id"})
+
+    requests_session = ExplicitTokenRequests()
+    publisher = RadarPublisher(
+        config=config,
+        request_session=requests_session,
+        access_token="explicit-server-side-token",
+    )
+    created = publisher._create_dataset({"id": "source-id", "title": "Dataset"})
+
+    assert created["id"] == "remote-dataset-id"
+    assert requests_session.calls[0][1]["headers"]["Authorization"] == (
+        "Bearer explicit-server-side-token"
     )
 
 

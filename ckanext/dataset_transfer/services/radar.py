@@ -70,7 +70,8 @@ class RadarPublisher(object):
         self.requests = request_session or requests
         if bool(access_token) == bool(token_provider):
             raise RadarConfigError(
-                "RadarPublisher requires exactly one user access token or token provider"
+                "RADAR4Ing authentication is not configured. Provide exactly one "
+                "server-side access token or token provider when creating RadarPublisher."
             )
         self.access_token = access_token
         self.token_provider = token_provider
@@ -147,8 +148,8 @@ class RadarPublisher(object):
         else:
             access_token = self.access_token
         if not access_token:
-            raise RadarPublishError(
-                "Connect your RADAR4Ing account before publishing."
+            raise RadarConfigError(
+                "RADAR4Ing authentication did not provide an access token."
             )
         headers = {"Authorization": "Bearer {}".format(access_token)}
         headers.update(extra or {})
@@ -640,13 +641,14 @@ class RadarPublisher(object):
             ):
                 self.token_provider.mark_reauthentication_required()
             raise RadarPublishError(
-                "Your RADAR4Ing authorization is no longer valid. Reconnect your account."
+                "The configured RADAR4Ing authentication was rejected. "
+                "Configure valid server-side credentials before publishing."
             )
         if response.status_code == 403:
             raise RadarPublishError(
-                "Your RADAR4Ing account is connected, but you do not have permission "
-                "to upload datasets to the configured workspace. Please contact your "
-                "RADAR workspace administrator."
+                "The configured RADAR4Ing credentials do not have permission to upload "
+                "datasets to the configured workspace. Please contact the RADAR "
+                "workspace administrator."
             )
         if response.status_code == 429:
             raise RadarPublishError(
