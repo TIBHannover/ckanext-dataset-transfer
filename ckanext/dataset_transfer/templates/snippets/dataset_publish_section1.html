@@ -1,84 +1,50 @@
-<section id="publish_step1">
-    <div class="row">
-        <div class="col-sm-12">
-            <div class="alert alert-info text-justify">
-                <p>
-                    {{_('Please note: We need your API token from LUH data repository to be able to publish your dataset.
-                        If you already stored your LUH API token, you can skip this by clicking the checkbox.
-                    ')}}
-                </p>
-            </div>
-            <div class="alert alert-warning text-justify">
-                <p>
-                    {{_('Please make sure your dataset has these fields. Without them you are not able to publish this dataset:')}}
-                </p>
-                <ul>
-                    <li>License</li>
-                    <li>Author name and email</li>
-                    <li>Maintainer name and email</li>
-                </ul>
-            </div>
-        </div>
+<section id="publish_step1" class="publish-entry-step" aria-live="polite">
+  <div id="publish_target_details" hidden>
+    <div class="publish-numbered-section luh-only">
+
+      <div class="publish-step-content">
+        <h3>{{ _('Requirements for LUH data repository') }}</h3>
+        <p class="publish-requirement">
+          {{ _('You need a personal API token from the') }}
+          <a href="{{ h.get_target_public_url() }}"
+          target="_blank"
+          rel="noopener noreferrer">
+          {{ _('LUH Data Repository') }}
+          </a> account.
+          {{ _('You can generate or manage your token under API Tokens in your user profile.') }}
+      </p>
+      </div>
     </div>
-    <br>
-    <div class="row" id="api_token_exist_info_box">
-        <div class="col-sm-12">
-            <div class="alert alert-success text-justify">
-                <p>
-                    {{_('Note: You already have an API token. You can continue by clicking the second checkbox. 
-                        Alternatively, you can store a new token if you wish.
-                    ')}}
-                </p>
-            </div>
+    <div class="publish-numbered-section luh-only" id="luh_api_token_section">
+
+      <div class="publish-step-content">
+        <h3>{{ _('API token') }}</h3>
+        {% if stored_api_token.available %}
+          <div class="radio publish-token-option">
+            <label for="api_token_saved"><input type="radio" name="api_token_choice" id="api_token_saved" value="saved" checked> <strong>{{ _('Use my API token (default)') }}</strong></label>
+            <span class="stored-token-mask">{{ _('Stored token') }} &bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;{{ stored_api_token.suffix }}</span>
+          </div>
+        {% endif %}
+        <div class="radio publish-token-option">
+          <label for="api_token_new"><input type="radio" name="api_token_choice" id="api_token_new" value="new"{% if not stored_api_token.available %} checked{% endif %}> {{ _('Add new API token') }}</label>
         </div>
+        <div id="new_api_token_controls"{% if stored_api_token.available %} hidden{% endif %}>
+          <label class="sr-only" for="transfer_api_token_input">{{ _('New LUH API token') }}</label>
+          <input class="form-control" type="password" autocomplete="new-password" name="api_token" id="transfer_api_token_input" placeholder="{{ _('Paste new API token') }}">
+          <div class="checkbox publish-overwrite-option">
+            <label for="save_api_token_box"><input type="checkbox" name="save_api_token_box" id="save_api_token_box" value="true"> {{ _('Overwrite my stored API token permanently') }}</label>
+            <p class="help-block">{{ _('Unchecked, the new token is used for this session only.') }}</p>
+          </div>
+        </div>
+        <input type="hidden" name="token_exist_box" id="token_exist_box" value="{{ 'true' if stored_api_token.available else 'false' }}">
+        <div class="alert alert-danger" id="api_token_input_empty_alert_box" role="alert">{{ _('Please paste a new API token.') }}</div>
+      </div>
     </div>
-    <div class="row" id="api_token_not_exist_alert_box">
-        <div class="col-sm-12">
-            <div class="alert alert-danger text-justify">
-                <p>
-                    {{_('You do not have any API token! Please enter a new one.')}}
-                </p>
-            </div>
-        </div>
+    <div class="publish-numbered-section radar-only" id="radar_existing_transfer"{% if not transfer_status.radar %} hidden{% endif %}>
+      <div class="publish-step-content publish-transfer-notice">
+        <span class="publish-info-icon" aria-hidden="true">i</span>
+        <div><h3>{{ _('Already transferred') }}</h3><p>{{ _('This dataset is already in RADAR4Ing.') }}{% if transfer_status.radar and transfer_status.radar.published_url %} <a href="{{ transfer_status.radar.published_url }}" target="_blank" rel="noopener">{{ _('View existing transfer') }}</a>{% endif %}</p></div>
+      </div>
     </div>
-    <br>
-    <div class="row" id="api_token_input_empty_alert_box">
-        <div class="col-sm-12">
-            <div class="alert alert-danger text-justify">
-                <p>
-                    {{_('Please provide an API token or use your existing token!')}}
-                </p>
-            </div>
-        </div>
-    </div>
-    <div class="row">
-        <div class="col-sm-12">
-            {{ macro.input('api_token', 
-                id='transfer_api_token_input', 
-                label=_('Your LUH API Token'),                          
-                classes=['control-medium'] ,
-                placeholder="My API token is ...")
-            }}
-            <label class="checkbox-container">{{_('Store my API token for the future requests.')}}                     
-                <input type="checkbox" 
-                class="token-exist-box"
-                name="save_api_token_box"  
-                id="save_api_token_box"
-                >
-                <span class="checkmark"></span>
-            </label> 
-        </div>
-    </div><br><br>
-    <div class="row">
-        <div class="col-sm-12">
-            <label class="checkbox-container">{{_('Use my existing API token.')}}                     
-                <input type="checkbox" 
-                class="token-exist-box"
-                name="token_exist_box"  
-                id="token_exist_box"
-                >
-                <span class="checkmark"></span>
-            </label> 
-        </div>
-    </div>
+  </div>
 </section>

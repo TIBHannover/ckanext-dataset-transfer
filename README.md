@@ -95,6 +95,80 @@ the partially created destination dataset. An administrator must reconcile the
 remote dataset before another publication attempt.
 
 
+## RADAR Test Configuration
+
+RADAR publishing can be tested from the same publish page by selecting
+`RADAR` as the publish target.
+
+Add the RADAR test settings to your local CKAN config:
+
+    ckanext.dataset_transfer.radar.context_url = https://test.radar-service.eu/radar
+    ckanext.dataset_transfer.radar.ingest_url = https://test.radar-service.eu/radar-ingest
+    ckanext.dataset_transfer.radar.workspace_id = YOUR_WORKSPACE_ID
+    ckanext.dataset_transfer.radar.responsible_email = your-email@example.org
+    ckanext.dataset_transfer.radar.retention_period = 10
+    ckanext.dataset_transfer.radar.schema_key = RDDM
+    ckanext.dataset_transfer.radar.schema_version = 9.3
+    ckanext.dataset_transfer.radar.publisher = TIB
+    ckanext.dataset_transfer.radar.metadata_identifier_prefix = 10.0000
+    ckanext.dataset_transfer.radar.verification_retry_interval = 5
+    ckanext.dataset_transfer.radar.verification_max_duration = 120
+
+Project-specific DFG funding defaults use `ckanext.crc.project.id` (or the
+Docker variable `CKANEXT__CRC__PROJECT__ID`). Configure the verified award
+number before transfer with:
+
+    ckanext.dataset_transfer.radar.dfg_award_number = VERIFIED_DFG_PROJECT_NUMBER
+
+Docker deployments may use
+`CKANEXT_DATASET_TRANSFER_RADAR_DFG_AWARD_NUMBER`. This must contain the
+verified DFG project number for the current CRC deployment. A missing value
+(or the former development placeholder `12345`) blocks RADAR transfer.
+
+Destination-aware transfer status does not require a database migration. New
+records store an explicit LUH or RADAR marker together with the remote dataset
+identifier in the existing `published_dataset_id` column. Older unmarked rows
+are displayed as legacy transfers with an unknown destination; their target is
+not guessed from DOI prefixes or URLs.
+
+### RADAR authentication
+
+The user-specific RADAR OAuth connection feature has been removed. The
+publication page still provides the RADAR metadata review, consent,
+confirmation, XML generation, upload, reconciliation, and duplicate-protection
+workflow, but the web controller does not currently have a supported bearer
+credential source. A RADAR publication therefore fails closed before any
+unauthenticated remote request is made.
+
+`RadarPublisher` continues to require exactly one access token or token provider
+injected by trusted server-side code. Before RADAR publication can be enabled
+again, deploy a supported server-side authentication integration that provides
+a valid bearer token without exposing it to the browser. The extension does not
+fall back to the former shared settings or a personal curator account:
+
+    ckanext.dataset_transfer.radar.access_token
+    ckanext.dataset_transfer.radar.redirect_url
+    ckanext.dataset_transfer.radar.user_name
+    ckanext.dataset_transfer.radar.user_password
+
+The historical Alembic revision `8c7e4d91a2f0` remains as a no-op compatibility
+marker because an installation may already be stamped at that revision. It does
+not create, use, downgrade, or drop OAuth tables. The removed feature no longer
+uses Redis and does not require an OAuth database migration.
+
+Automated tests use explicitly injected mock bearer tokens for the RADAR
+publisher and never contact real RADAR or LUH endpoints.
+
+The generated descriptive metadata XML is validated locally against the bundled
+RADAR v9.3 descriptive schema, uploaded to RADAR, and then checked with RADAR's
+`/metadata/validate` endpoint. To override the bundled schema path, set:
+
+    ckanext.dataset_transfer.radar.descriptive_xsd_path = /path/to/RadarDataset.xsd
+
+When overriding the schema path, keep the RADAR v9.3 `RadarDataset.xsd`,
+`RadarElements.xsd`, and `RadarTypes.xsd` files in the same directory because
+the dataset schema imports the other two schemas.
+
 
 ## License
 

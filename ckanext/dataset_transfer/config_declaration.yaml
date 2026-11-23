@@ -8,3 +8,9 @@ groups:
         description: Destination CKAN action API base URL, ending in /api/3/action/. Defaults to the original LUH repository.
       - key: ckanext.dataset_transfer.target_public_url
         description: Public base URL used to construct destination dataset links. Defaults to the original LUH repository.
+  - annotation: RADAR4Ing publication settings
+    options:
+      - key: ckanext.dataset_transfer.radar.context_url
+        description: HTTPS base URL for the RADAR API environment.
+      - key: ckanext.dataset_transfer.radar.workspace_id
+        description: RADAR workspace used for publication once a supported server-side authentication provider is configured.

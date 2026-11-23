@@ -1,42 +1,47 @@
 {% extends "package/read.html" %}
-{% import 'macros/form.html' as macro %}
 
 {% block primary_content_inner %}
-    {% asset 'ckanext-dataset-transfer/transfer-css' %}
-    {% asset 'ckanext-dataset-transfer/transfer-js' %}    
-    <input type="hidden" id="publish_url" value="{{ h.url_for('dataset_transfer.publish', _external=True) }}">
-    <input type="hidden" id="check_api_token" value="{{ h.url_for('dataset_transfer.user_has_api_token', _external=True) }}">
-    <input type="hidden" id="package_id" value="{{ pkg_dict.id }}">
-    <div class="row">
-        <h2 class="modal-title">{{
-            _('Publish the dataset <span id="publish_page_dataset_name_in_title">' ~ pkg_dict.title ~ '</span> to LUH data repository')
-            }}
-        </h2>
+  {% asset 'ckanext-dataset-transfer/transfer-css' %}
+  {% asset 'ckanext-dataset-transfer/transfer-js' %}
+  <input type="hidden" id="publish_url" value="{{ h.url_for('dataset_transfer.publish', _external=True) }}">
+  <input type="hidden" id="check_api_token" value="{{ h.url_for('dataset_transfer.user_has_api_token', _external=True) }}">
+  <input type="hidden" id="package_id" value="{{ pkg_dict.id }}">
+  <div id="publish_destination_selection" data-radar-transferred="{{ 'true' if transfer_status.radar else 'false' }}">
+    <div class="row"><h2 class="modal-title">{{ _('Publish the dataset') }} <span id="publish_page_dataset_name_in_title">{{ pkg_dict.title }}</span></h2></div>
+    <div class="publish-numbered-section">
+
+      <div class="publish-step-content">
+        <h3 class="publish-section-heading"><label for="publish_target">{{ _('Publish target') }}</label></h3>
+        <select class="form-control" id="publish_target" name="publish_target">
+          <option value="" selected>{{ _('Select a publish target') }}</option>
+          <option value="luh">{{ _('LUH data repository') }}</option>
+          <option value="radar">{{ _('RADAR4Ing') }}</option>
+        </select>
+        <p class="help-block" id="publish_target_description"
+           data-initial="{{ _('Choose where to publish the dataset. The requirements of the chosen repository appear below.') }}"
+           data-luh="{{ _('Publishes the dataset to the LUH data repository of Leibniz University Hannover. Publishing uses your personal LUH API token.') }}"
+           data-radar="{{ _('Publishes the dataset to RADAR4Ing, the research data repository for the engineering sciences.') }}">{{ _('Choose where to publish the dataset. The requirements of the chosen repository appear below.') }}</p>
+      </div>
     </div>
-    <br>
-    <div class="row">
-        <div class="col-sm-12">
-            <div class="alert alert-info text-justify" role="alert">
-                <p lang="de">
-                    Bitte stellen Sie sicher, dass Ihr Nutzerkonto im LUH Daten-Repository der Organisation des SFBs zugeordnet ist. Falls dies noch nicht der Fall ist, wenden Sie sich an das INF-Team.
-                </p>
-                <p lang="en">
-                    Please make sure that your LUH data repository user account is assigned to the CRC's organization in the LUH data repository. If this is not yet the case, please contact the INF team.
-                </p>
-            </div>
-        </div>
+  </div>
+  {% snippet "snippets/dataset_publish_section1.html", stored_api_token=stored_api_token, transfer_status=transfer_status %}
+  {% snippet "snippets/radar_metadata_review.html", radar_metadata=radar_metadata, radar_vocabularies=radar_vocabularies, radar_policy_errors=radar_policy_errors %}
+  {% snippet "snippets/dataset_publish_section2.html" %}
+  {% snippet "snippets/dataset_publish_section3.html", pkg_dict=pkg_dict %}
+  {% snippet "snippets/dataset_publish_result_section.html", pkg_dict=pkg_dict %}
+  <div class="row" id="action_btn_part">
+    <br><hr>
+    <div class="col-sm-12 publish-action-bar">
+      <div class="publish-primary-actions">
+        <a href="{{ h.url_for('dataset.read', id=pkg_dict['name'], _external=True) }}" id="dataset_transfer_cancel_btn"
+           style="display: inline-flex; align-items: center; justify-content: center;"
+           class="btn btn-default">{{ _('Cancel') }}</a>
+        <button id="dataset_transfer_back_btn" class="btn btn-default" type="button">{{ _('Back') }}</button>
+        <button type="submit" id="dataset_transfer_submit" class="btn btn-success org_should_exist"
+                style="display: inline-flex; align-items: center; justify-content: center;" step="2">{{ _('Publish') }}</button>
+        <button id="dataset_transfer_next_btn" class="btn btn-primary org_should_exist"
+                step="2" style="display: inline-flex; align-items: center; justify-content: center;">{{ _('Publish') }}</button>
+      </div>
     </div>
-    {% snippet "snippets/dataset_publish_section1.html", macro=macro %}
-    {% snippet "snippets/dataset_publish_section2.html" %}
-    {% snippet "snippets/dataset_publish_section3.html", pkg_dict=pkg_dict %}
-    {% snippet "snippets/dataset_publish_result_section.html", pkg_dict=pkg_dict %}
-    <div class="row" id="action_btn_part">
-        <br><hr>
-        <div class="col-sm-12">
-            <a href="{{h.url_for('dataset.read', id=pkg_dict['name'],  _external=True)}}" id="dataset_transfer_cancel_btn" type="button" class="btn btn-danger pull-left">{{_('Cancel Publish')}}</a>
-            <button id="dataset_transfer_next_btn" class="btn btn-primary pull-right org_should_exist" step="2">{{_('Next')}}</button>
-            <button type="submit" id="dataset_transfer_submit" class="btn btn-success pull-right org_should_exist" step="2">{{_('Publish')}}</button>  
-        </div>
-    </div>
-    
+  </div>
 {% endblock %}

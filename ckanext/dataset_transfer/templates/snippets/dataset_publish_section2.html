@@ -13,55 +13,78 @@
     </div>
     <div class="row">
         <div class="col-sm-12">
-            <h3>
+            <h3 class="luh-only">
                 {{_('Your dataset will get published in this organization: ')}} <strong>{{h.get_org_name()}}</strong>
             </h3>
+            <h3 class="radar-only">{{ _('Review the RADAR terms and conditions') }}</h3>
         </div>
     </div>
     <br><hr>
     <div class="row org_should_exist" id="consent_boxes">
         <div class="alert alert-warning text-justify">
             <p>
-                {{_('For publishing your dataset, you need to agree with the LUH terms of usage and rights of use.')}}
+                    {{_('For publishing your dataset, you need to confirm the target repository terms of usage and rights of use.')}}
             </p>
         </div>
         <div class="row" id="no_consent_alert_message">
             <div class="col-sm-12">
                 <div class="alert alert-danger text-justify">
                     <p>
-                        {{_(' You need to declare your consent to LUH terms of usage and rights of use to publish your dataset.
+                        {{_(' You need to declare your consent to the target repository terms of usage and rights of use to publish your dataset.
                         ')}}
                     </p>
                 </div>
             </div>
-        </div>
         <div class="col-sm-12">
-              <label class="checkbox-container">
-                {{_('I am agree to the terms of usage. More details under ')}}
-                <a href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen" target="_blank">
-                    Conditions and Terms of usage
-                </a>
-                <input type="checkbox" 
-                class="token-exist-box consent-box"
-                name="terms_of_usage"  
-                id="terms_of_usage"
-                >
-                <span class="checkmark"></span>
-            </label>
-        </div>
-        <div class="col-sm-12">
-              <label class="checkbox-container">
-                {{_('I am sure that the saved research data is free of third party rights. Example: personal data. Read more on the ')}}
-                <a href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen" target="_blank"> 
-                    Conditions and Terms of usage
-                </a>
-                <input type="checkbox" 
-                class="token-exist-box consent-box"
-                name="rights_of_use"  
-                id="rights_of_use"
-                >
-                <span class="checkmark"></span>
-            </label> 
-        </div>
+    <label class="checkbox-container">
+
+        {{ _('I confirm that the research data does not infringe third-party rights and does not contain personal data prohibited by the selected repository.') }}
+
+        <a class="luh-only"
+           href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen"
+           target="_blank"
+           rel="noopener noreferrer">
+            {{ _('Conditions and Terms of Use') }}
+        </a>
+
+        <a class="radar-only"
+           href="https://www.scc.kit.edu/kooperationen/radar4ing/26.php"
+           target="_blank"
+           rel="noopener noreferrer">
+            {{ _('RADAR4Ing Terms of Use') }}
+        </a>
+
+        <input type="checkbox"
+               class="token-exist-box consent-box"
+               name="rights_of_use"
+               id="rights_of_use">
+
+        <span class="checkmark"></span>
+
+    </label>
+    <div class="col-sm-12">
+        <label class="checkbox-container">
+
+            {{ _('I confirm that the research data does not infringe third-party rights and does not contain personal data prohibited by the selected repository.') }}
+
+            <a class="luh-only"
+               href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen"
+               target="_blank"
+               rel="noopener noreferrer">
+                {{ _('Conditions and Terms of Use') }}
+            </a>
+
+            <a class="radar-only"
+               href="https://www.scc.kit.edu/kooperationen/radar4ing/26.php"
+               target="_blank"
+               rel="noopener noreferrer">
+                {{ _('RADAR4Ing Terms of Use') }}
+            </a>
+            <input type="checkbox"
+                   class="token-exist-box consent-box"
+                   name="rights_of_use"
+                   id="rights_of_use">
+            <span class="checkmark"></span>
+        </label>
     </div>
 </section>

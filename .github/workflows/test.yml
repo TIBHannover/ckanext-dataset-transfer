@@ -38,6 +38,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+    - name: Run frontend tests
+      run: node --test ckanext/dataset_transfer/tests/test_identifier_validation.js
     - name: Install requirements
       # Install any extra requirements your extension has here (dev requirements, other extensions etc)
       run: |
