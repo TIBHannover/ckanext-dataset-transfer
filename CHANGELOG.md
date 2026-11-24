@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
   fallback for deployments targeting the original LUH repository. Explicit
   `ckanext.dataset_transfer.target_organization` configuration remains
   preferred and is required for custom destinations and TRR375.
+- Restored the separate terms-of-use and rights-of-use consent declarations so
+  RADAR and LUH publication can advance only after both are accepted.
 
 ## [1.1.1] - 2026-11-24
 

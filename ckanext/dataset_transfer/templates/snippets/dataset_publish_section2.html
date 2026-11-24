@@ -35,35 +35,34 @@
                     </p>
                 </div>
             </div>
+        </div>
         <div class="col-sm-12">
-    <label class="checkbox-container">
+            <label class="checkbox-container" for="terms_of_usage">
+                {{ _('I accept the selected repository terms of use.') }}
 
-        {{ _('I confirm that the research data does not infringe third-party rights and does not contain personal data prohibited by the selected repository.') }}
+                <a class="luh-only"
+                   href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen"
+                   target="_blank"
+                   rel="noopener noreferrer">
+                    {{ _('Conditions and Terms of Use') }}
+                </a>
 
-        <a class="luh-only"
-           href="https://www.luis.uni-hannover.de/de/services/speichersysteme/forschungsdaten-repositorium/nutzungs-und-datenschutzbestimmungen"
-           target="_blank"
-           rel="noopener noreferrer">
-            {{ _('Conditions and Terms of Use') }}
-        </a>
+                <a class="radar-only"
+                   href="https://www.scc.kit.edu/kooperationen/radar4ing/26.php"
+                   target="_blank"
+                   rel="noopener noreferrer">
+                    {{ _('RADAR4Ing Terms of Use') }}
+                </a>
 
-        <a class="radar-only"
-           href="https://www.scc.kit.edu/kooperationen/radar4ing/26.php"
-           target="_blank"
-           rel="noopener noreferrer">
-            {{ _('RADAR4Ing Terms of Use') }}
-        </a>
-
-        <input type="checkbox"
-               class="token-exist-box consent-box"
-               name="rights_of_use"
-               id="rights_of_use">
-
-        <span class="checkmark"></span>
-
-    </label>
-    <div class="col-sm-12">
-        <label class="checkbox-container">
+                <input type="checkbox"
+                       class="token-exist-box consent-box"
+                       name="terms_of_usage"
+                       id="terms_of_usage">
+                <span class="checkmark"></span>
+            </label>
+        </div>
+        <div class="col-sm-12">
+            <label class="checkbox-container" for="rights_of_use">
 
             {{ _('I confirm that the research data does not infringe third-party rights and does not contain personal data prohibited by the selected repository.') }}
 
@@ -85,6 +84,7 @@
                    name="rights_of_use"
                    id="rights_of_use">
             <span class="checkmark"></span>
-        </label>
+            </label>
+        </div>
     </div>
 </section>

@@ -205,3 +205,34 @@ test('delegated handlers cover existing and dynamic identifier fields without ch
   assert.ok(source.includes("url: 'https://api.ror.org/v2/organizations'"));
   assert.match(source, /class="fa fa-trash"/);
 });
+
+test('consent validation requires every rendered declaration', () => {
+  const context = loadTransferScript();
+  const terms = {checked: false, disabled: false};
+  const rights = {checked: false, disabled: false};
+
+  assert.equal(context.required_consents_accepted([]), false);
+  assert.equal(context.required_consents_accepted([terms, rights]), false);
+
+  terms.checked = true;
+  assert.equal(context.required_consents_accepted([terms, rights]), false);
+
+  rights.checked = true;
+  assert.equal(context.required_consents_accepted([terms, rights]), true);
+
+  rights.disabled = true;
+  assert.equal(context.required_consents_accepted([terms, rights]), false);
+});
+
+test('consent navigation uses one idempotent handler and clears a previous error', () => {
+  const source = transferSource();
+
+  assert.equal(
+    (source.match(/\.on\('click\.datasetTransfer'/g) || []).length,
+    1
+  );
+  assert.ok(source.includes(".off('click.datasetTransfer')"));
+  assert.ok(source.includes('if(!required_consents_accepted())'));
+  assert.ok(source.includes('$("#no_consent_alert_message").hide();'));
+  assert.ok(source.includes("$(this).attr(\"step\", \"4\")"));
+});

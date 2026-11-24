@@ -35,14 +35,24 @@ const radarSupportedRights = [
     'Other'
 ];
 
+function required_consents_accepted(consents){
+    let controls = consents || $('#consent_boxes input.consent-box').toArray();
+    return controls.length > 0 && Array.prototype.every.call(controls, function(control){
+        return control.checked === true && control.disabled !== true;
+    });
+}
+
 $(document).ready(function(){
     update_publish_target_fields();
 
     /**
      * Click on the next button
      */
-    $('#dataset_transfer_next_btn').click(function(){
-        let step = $(this).attr("step");
+    $('#dataset_transfer_next_btn')
+        .off('click.datasetTransfer')
+        .on('click.datasetTransfer', function(event){
+            event.preventDefault();
+            let step = $(this).attr("step");
         if( step === "2"){
             if($('#publish_target').val() === "radar"){
                 $('#publish_destination_selection').hide();
@@ -94,10 +104,11 @@ $(document).ready(function(){
             }
         }
         else if (step === "3"){          
-            if($('#terms_of_usage').prop('checked') !== true || $('#rights_of_use').prop('checked') !== true){
+            if(!required_consents_accepted()){
                 $("#no_consent_alert_message").show();
             }
             else{
+                $("#no_consent_alert_message").hide();
                 $('#publish_step1').hide();
                 $('#publish_step2').hide();
                 if($('#publish_target').val() === 'radar'){
@@ -281,8 +292,10 @@ $(document).ready(function(){
         $('#organization_empty_box_alert').hide();
      });
 
-     $('.consent-box').click(function(){
-        $('#no_consent_alert_message').hide();
+     $('.consent-box').on('change', function(){
+        if(required_consents_accepted()){
+            $('#no_consent_alert_message').hide();
+        }
      });
 
      $('#publish_target').change(function(){

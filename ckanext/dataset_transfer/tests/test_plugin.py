@@ -297,18 +297,39 @@ def test_publish_page_renders_for_editor(app):
         "dataset_transfer.publish_page", dataset_name=dataset["name"]
     )
     response = app.get(url, headers=_auth_headers(user))
+    body = _body(response)
 
-    assert response.status_code == 200, _body(response)
-    assert "Publish the dataset" in _body(response)
-    assert 'id="publish_url"' in _body(response)
-    assert "Migration test dataset" in _body(response)
-    assert "Select a publish target" in _body(response)
-    assert "LUH data repository" in _body(response)
-    assert "RADAR4Ing" in _body(response)
-    assert 'id="publish_target_details" hidden' in _body(response)
-    assert "Connect to RADAR4Ing" not in _body(response)
-    assert "RADAR4Ing authorization successful" not in _body(response)
-    assert "Disconnect" not in _body(response)
+    assert response.status_code == 200, body
+    assert "Publish the dataset" in body
+    assert 'id="publish_url"' in body
+    assert "Migration test dataset" in body
+    assert "Select a publish target" in body
+    assert "LUH data repository" in body
+    assert "RADAR4Ing" in body
+    assert 'id="publish_target_details" hidden' in body
+    assert "Connect to RADAR4Ing" not in body
+    assert "RADAR4Ing authorization successful" not in body
+    assert "Disconnect" not in body
+
+    consent_section = body[
+        body.index('id="consent_boxes"'):
+        body.index("</section>", body.index('id="consent_boxes"'))
+    ]
+    assert consent_section.count('id="terms_of_usage"') == 1
+    assert consent_section.count('name="terms_of_usage"') == 1
+    assert consent_section.count('for="terms_of_usage"') == 1
+    assert consent_section.count('id="rights_of_use"') == 1
+    assert consent_section.count('name="rights_of_use"') == 1
+    assert consent_section.count('for="rights_of_use"') == 1
+    checkbox_tags = re.findall(
+        r'<input\b[^>]*\btype="checkbox"[^>]*>', body, re.DOTALL
+    )
+    checkbox_ids = [
+        re.search(r'\bid="([^"]+)"', tag).group(1)
+        for tag in checkbox_tags
+        if re.search(r'\bid="([^"]+)"', tag)
+    ]
+    assert len(checkbox_ids) == len(set(checkbox_ids))
 
 
 @pytest.mark.parametrize(
@@ -711,6 +732,29 @@ def test_publish_rejects_missing_consent_with_json_error(app):
         "error": "Missing consent",
         "message": "Terms of usage and rights of use must be accepted.",
     }
+
+
+@pytest.mark.usefixtures("dataset_transfer_migrated_db")
+def test_radar_publish_rejects_either_missing_consent(app):
+    import ckan.tests.factories as factories
+
+    user = factories.SysadminWithToken()
+    dataset = factories.Dataset()
+
+    for terms, rights in (("false", "true"), ("true", "false")):
+        response = app.post(
+            "/dataset_transfer/publish",
+            params={
+                "package_id": dataset["id"],
+                "publish_target": "radar",
+                "terms_of_usage": terms,
+                "rights_of_use": rights,
+            },
+            headers=_auth_headers(user),
+        )
+
+        assert response.status_code == 400
+        assert response.json["error"] == "Missing consent"
 
 
 @pytest.mark.usefixtures("dataset_transfer_migrated_db")
