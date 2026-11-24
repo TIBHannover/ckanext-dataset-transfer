@@ -113,6 +113,12 @@ Add the RADAR test settings to your local CKAN config:
     ckanext.dataset_transfer.radar.metadata_identifier_prefix = 10.0000
     ckanext.dataset_transfer.radar.verification_retry_interval = 5
     ckanext.dataset_transfer.radar.verification_max_duration = 120
+    ckanext.dataset_transfer.radar.dataset_url_template = https://test.radar-service.eu/radar/en/dataset/{dataset_id}
+    ckanext.dataset_transfer.radar.client_id = YOUR_CLIENT_ID
+    ckanext.dataset_transfer.radar.client_secret = YOUR_CLIENT_SECRET
+    ckanext.dataset_transfer.radar.redirect_url = https://www.tib.eu
+    ckanext.dataset_transfer.radar.user_name = YOUR_TECHNICAL_ACCOUNT_USERNAME
+    ckanext.dataset_transfer.radar.user_password = YOUR_TECHNICAL_ACCOUNT_PASSWORD
 
 Project-specific DFG funding defaults use `ckanext.crc.project.id` (or the
 Docker variable `CKANEXT__CRC__PROJECT__ID`). Configure the verified award
@@ -133,31 +139,56 @@ not guessed from DOI prefixes or URLs.
 
 ### RADAR authentication
 
-The user-specific RADAR OAuth connection feature has been removed. The
-publication page still provides the RADAR metadata review, consent,
-confirmation, XML generation, upload, reconciliation, and duplicate-protection
-workflow, but the web controller does not currently have a supported bearer
-credential source. A RADAR publication therefore fails closed before any
-unauthenticated remote request is made.
+RADAR publication uses a shared technical account configured by an
+administrator. This is server-side authentication, not user-specific OAuth:
+the configured technical account may appear in RADAR as the uploading user.
+The CKAN user's existing dataset-edit authorization is still checked before a
+publication can be triggered, but the CKAN username is never substituted for
+the configured RADAR username.
 
-`RadarPublisher` continues to require exactly one access token or token provider
-injected by trusted server-side code. Before RADAR publication can be enabled
-again, deploy a supported server-side authentication integration that provides
-a valid bearer token without exposing it to the browser. The extension does not
-fall back to the former shared settings or a personal curator account:
+The controller injects a request-scoped token provider into `RadarPublisher`.
+The provider posts the five authentication values to the configured RADAR
+context URL plus `/api/tokens`, requires HTTPS, and retains the bearer token
+only in memory for the current transfer. When RADAR returns an expiration
+lifetime, the token is refreshed shortly before expiry. Without expiration
+information it is retained only for that provider/transfer. An HTTP 401 clears
+the cached token and permits one authentication retry; repeated failures stop
+publication. Credentials and bearer tokens are never rendered in templates or
+JavaScript, persisted in dataset metadata or new tables, or included in logs.
 
-    ckanext.dataset_transfer.radar.access_token
-    ckanext.dataset_transfer.radar.redirect_url
-    ckanext.dataset_transfer.radar.user_name
-    ckanext.dataset_transfer.radar.user_password
+Docker/GitLab deployments can supply the exact variables below. Store the
+secret and password as protected, masked CI/CD variables. Literal unresolved
+`${...}` or `{{...}}` placeholders are rejected:
+
+    CKANEXT_DATASET_TRANSFER_RADAR_CLIENT_ID
+    CKANEXT_DATASET_TRANSFER_RADAR_CLIENT_SECRET
+    CKANEXT_DATASET_TRANSFER_RADAR_REDIRECT_URL
+    CKANEXT_DATASET_TRANSFER_RADAR_USER_NAME
+    CKANEXT_DATASET_TRANSFER_RADAR_USER_PASSWORD
+
+The context URL is also read directly from
+`CKANEXT_DATASET_TRANSFER_RADAR_CONTEXT_URL` when the CKAN config key is absent.
+For Docker YAML, configure the public link explicitly:
+
+    CKANEXT_DATASET_TRANSFER_RADAR_DATASET_URL_TEMPLATE: "https://test.radar-service.eu/radar/en/dataset/{dataset_id}"
+
+The template must contain `{dataset_id}`. Its default is derived from the
+configured context URL as `<context>/en/dataset/{dataset_id}`, which supports
+the standard test and production RADAR layouts. The same formatter is used for
+successful and incomplete transfers; links are never guessed from DOI values.
+
+RADAR response bodies, authorization data, and request bodies containing
+authentication values are not logged. Operational logs retain the operation,
+HTTP status, and dataset identifier. User-facing authentication and API errors
+are deliberately sanitized.
 
 The historical Alembic revision `8c7e4d91a2f0` remains as a no-op compatibility
 marker because an installation may already be stamped at that revision. It does
 not create, use, downgrade, or drop OAuth tables. The removed feature no longer
 uses Redis and does not require an OAuth database migration.
 
-Automated tests use explicitly injected mock bearer tokens for the RADAR
-publisher and never contact real RADAR or LUH endpoints.
+Automated tests use mock token and RADAR API responses and never contact real
+RADAR or LUH endpoints.
 
 The generated descriptive metadata XML is validated locally against the bundled
 RADAR v9.3 descriptive schema, uploaded to RADAR, and then checked with RADAR's

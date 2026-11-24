@@ -13,4 +13,16 @@ groups:
       - key: ckanext.dataset_transfer.radar.context_url
         description: HTTPS base URL for the RADAR API environment.
       - key: ckanext.dataset_transfer.radar.workspace_id
-        description: RADAR workspace used for publication once a supported server-side authentication provider is configured.
+        description: RADAR workspace used for publication by the configured technical account.
+      - key: ckanext.dataset_transfer.radar.dataset_url_template
+        description: Public RADAR dataset URL containing the required {dataset_id} placeholder.
+      - key: ckanext.dataset_transfer.radar.client_id
+        description: Server-side RADAR technical-account client identifier. Prefer a protected environment variable.
+      - key: ckanext.dataset_transfer.radar.client_secret
+        description: Server-side RADAR technical-account client secret. Never expose this setting to clients.
+      - key: ckanext.dataset_transfer.radar.redirect_url
+        description: Redirect URL required by the RADAR token API.
+      - key: ckanext.dataset_transfer.radar.user_name
+        description: RADAR shared technical-account username.
+      - key: ckanext.dataset_transfer.radar.user_password
+        description: RADAR shared technical-account password. Never expose this setting to clients.

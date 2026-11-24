@@ -18,6 +18,10 @@ from ckanext.dataset_transfer.services.radar import (
     RadarPublishError,
     RadarPublisher,
 )
+from ckanext.dataset_transfer.services.radar_auth import (
+    RadarAuthConfigError,
+    RadarTokenProvider,
+)
 from ckanext.dataset_transfer.services.radar_metadata_mapping import (
     VOCABULARIES,
     apply_fixed_radar_metadata,
@@ -696,18 +700,20 @@ class BaseController():
             )
 
         try:
+            token_provider = RadarTokenProvider(toolkit.config)
+            radar_publisher = RadarPublisher(token_provider=token_provider)
             transfer_state = None
             if incomplete_radar_transfer:
                 transfer_state = PublishedDataset.decode_incomplete_radar_id(
                     incomplete_radar_transfer.published_dataset_id
                 )
                 transfer_state["doi"] = incomplete_radar_transfer.doi or ""
-            radar_result = RadarPublisher().publish_dataset(
+            radar_result = radar_publisher.publish_dataset(
                 dataset,
                 validation["metadata"],
                 transfer_state=transfer_state,
             )
-        except RadarConfigError as error:
+        except (RadarConfigError, RadarAuthConfigError) as error:
             log.exception(
                 "Dataset transfer RADAR configuration failed package_id=%s",
                 dataset.get("id"),
@@ -725,13 +731,7 @@ class BaseController():
                 error.missing,
             )
             if error.dataset_id and error.status:
-                published_url = toolkit.config.get(
-                    "ckanext.dataset_transfer.radar.dataset_url_template", ""
-                )
-                if published_url:
-                    published_url = published_url.format(
-                        dataset_id=error.dataset_id
-                    )
+                published_url = radar_publisher.dataset_url(error.dataset_id)
                 if incomplete_radar_transfer:
                     incomplete_radar_transfer.doi = error.doi or ""
                     incomplete_radar_transfer.published_url = published_url

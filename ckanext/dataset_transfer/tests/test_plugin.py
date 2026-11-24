@@ -1734,7 +1734,7 @@ def test_publish_dataset_to_radar_fails_closed_without_authentication(
 
     assert response.status_code == 503
     assert response.json["error"] == "RADAR authentication not configured"
-    assert "server-side access token or token provider" in response.json["message"]
+    assert response.json["message"] == "RADAR authentication is not configured."
 
 
 def test_radar_publisher_requires_explicit_server_side_authentication():
