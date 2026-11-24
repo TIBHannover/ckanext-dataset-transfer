@@ -1,5 +1,3 @@
-import logging
-
 import pytest
 import requests
 
@@ -182,16 +180,28 @@ def test_403_has_safe_workspace_permission_error():
         publisher._raise_for_radar(Response(403, {"secret": "value"}), "failed")
 
 
-def test_response_logging_never_includes_body_or_url(caplog):
+def test_response_logging_never_includes_body_or_url(monkeypatch):
+    from ckanext.dataset_transfer.services import radar
+
     secret = "Bearer top-secret-token"
     response = Response(500, text=secret)
     response.url = "https://example.test/api?clientSecret=secret"
-    with caplog.at_level(logging.INFO):
-        _log_response("RADAR operation", response, "dataset-id")
-    assert "status=500" in caplog.text
-    assert "dataset_id=dataset-id" in caplog.text
-    assert secret not in caplog.text
-    assert "clientSecret" not in caplog.text
+    calls = []
+    monkeypatch.setattr(radar.log, "info", lambda *args: calls.append(args))
+
+    _log_response("RADAR operation", response, "dataset-id")
+
+    assert calls == [
+        (
+            "%s completed status=%s dataset_id=%s",
+            "RADAR operation",
+            500,
+            "dataset-id",
+        )
+    ]
+    logged_values = " ".join(str(value) for value in calls[0])
+    assert secret not in logged_values
+    assert "clientSecret" not in logged_values
 
 
 def test_dataset_url_default_custom_and_invalid_template():
