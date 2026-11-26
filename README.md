@@ -206,6 +206,34 @@ the dataset schema imports the other two schemas.
 [AGPL](https://www.gnu.org/licenses/agpl-3.0.en.html)
 # External Publishing API
 
+## Managing External Repository Credentials
+
+The API token issued by the source CKAN instance and the LUH destination token
+serve different purposes. A source CKAN token authenticates the caller to this
+CKAN. The LUH token is created in an authorized account on the LUH Research Data
+Repository and authorizes transfers to that separate CKAN instance.
+
+After obtaining an LUH token from the LUH account's API-token page, sign in to
+the source CKAN and open **External API Tokens** in the user-profile navigation,
+or visit `/dataset_transfer/credentials`. Enter the token in the password field
+and save it. Existing tokens are rendered only as twelve mask characters plus
+their final four characters; the complete stored value is never returned to the
+browser. The page supports replacement, removal, and a non-mutating connection
+test against the configured LUH organization. Replacement takes effect for the
+next transfer. Removal leaves transfer history and RADAR publication unchanged.
+
+LUH publication from both the browser workflow and the authenticated Dataset
+Transfer Action API resolves the stored credential belonging to the identified
+source-CKAN user. A source CKAN API token is never forwarded to LUH as a
+destination credential.
+
+The existing `publish_api_token.api_token` column stores LUH tokens in
+plaintext. This change preserves that representation so existing credentials
+remain usable and requires no migration. Database access, backups, and operator
+permissions must therefore be protected as credential-bearing systems. No
+encryption-at-rest scheme is introduced without a stable, server-managed key
+and an explicit migration/rotation design.
+
 The extension exposes authenticated CKAN Action API operations for clients such
 as PORE. Send a normal source-CKAN API token in the `Authorization` header. The
 token identifies the user, but does not grant extra rights: validation and

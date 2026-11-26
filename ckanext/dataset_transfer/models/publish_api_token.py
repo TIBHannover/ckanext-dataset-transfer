@@ -40,6 +40,14 @@ class PublishApiToken(domain_object.DomainObject):
         record = query.first()
         return record
 
+    @classmethod
+    def get_all_by_user(cls, id, autoflush=True):
+        if not id:
+            return []
+        return meta.Session.query(cls).filter(
+            cls.user_id == id
+        ).order_by(cls.id.asc()).autoflush(autoflush).all()
+
 
 
 meta.mapper(

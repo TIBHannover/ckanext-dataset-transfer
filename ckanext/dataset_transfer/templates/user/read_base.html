@@ -1,0 +1,8 @@
+{% ckan_extends %}
+
+{% block content_primary_nav %}
+  {{ super() }}
+  {% if is_myself %}
+    {{ h.build_nav_icon('dataset_transfer.credentials', _('External API Tokens'), icon='external-link') }}
+  {% endif %}
+{% endblock %}

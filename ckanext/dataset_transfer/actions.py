@@ -1,7 +1,7 @@
 import ckan.plugins.toolkit as toolkit
 
 from ckanext.dataset_transfer.libs.helper import Helper
-from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
+from ckanext.dataset_transfer.services.credentials import CredentialService
 from ckanext.dataset_transfer.services.publish import PublishError, PublishService
 
 
@@ -45,8 +45,8 @@ def dataset_transfer_publish(context, data_dict):
         raise toolkit.ValidationError({"consent": ["terms_accepted and rights_confirmed must both be JSON true."]})
     destination_token = data_dict.get("luh_api_token")
     if target == "luh" and not destination_token:
-        user_obj = context.get("auth_user_obj")
-        record = PublishApiToken.get_by_user(user_obj.id if user_obj else None)
+        user_obj = CredentialService.user_from_action_context(context)
+        record = CredentialService.record_for_user(user_obj)
         destination_token = record.api_token if record else None
     try:
         return PublishService.publish(dataset, target, data_dict.get("radar_metadata"), destination_token)

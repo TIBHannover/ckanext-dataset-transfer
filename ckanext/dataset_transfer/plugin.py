@@ -2,6 +2,7 @@ import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
 from flask import Blueprint
 from ckanext.dataset_transfer.controllers.base import BaseController
+from ckanext.dataset_transfer.controllers.credentials import CredentialsController
 from ckanext.dataset_transfer.libs.helper import Helper
 
 
@@ -33,6 +34,23 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
             BaseController.publish_page,
             methods=['GET']
             )
+
+        blueprint.add_url_rule(
+            u'/dataset_transfer/credentials', u'credentials',
+            CredentialsController.page, methods=['GET']
+        )
+        blueprint.add_url_rule(
+            u'/dataset_transfer/credentials/save', u'credentials_save',
+            CredentialsController.save, methods=['POST']
+        )
+        blueprint.add_url_rule(
+            u'/dataset_transfer/credentials/remove', u'credentials_remove',
+            CredentialsController.remove, methods=['POST']
+        )
+        blueprint.add_url_rule(
+            u'/dataset_transfer/credentials/test', u'credentials_test',
+            CredentialsController.test_connection, methods=['POST']
+        )
 
         blueprint.add_url_rule(
             u'/dataset_transfer/load_publish_form_data',

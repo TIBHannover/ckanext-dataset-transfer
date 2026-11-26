@@ -12,7 +12,7 @@ from ckanext.dataset_transfer.libs.helper import Helper
 from flask import Response, request, render_template
 import ckan.plugins.toolkit as toolkit
 from ckanext.dataset_transfer.models.published_dataset import PublishedDataset
-from ckanext.dataset_transfer.models.publish_api_token import PublishApiToken
+from ckanext.dataset_transfer.services.credentials import CredentialService
 from ckanext.dataset_transfer.services.radar import (
     RadarConfigError,
     RadarPublishError,
@@ -289,13 +289,14 @@ class BaseController():
     @staticmethod
     def stored_api_token_info():
         """Return only presentation-safe metadata for the current user's token."""
-        if not getattr(toolkit.g, "user", None):
+        user = toolkit.current_user
+        if not user or getattr(user, "is_anonymous", False):
             return {"available": False, "suffix": ""}
-        record = PublishApiToken.get_by_user(toolkit.g.userobj.id)
-        if not record:
-            return {"available": False, "suffix": ""}
-        token = record.api_token or ""
-        return {"available": True, "suffix": token[-4:] if token else ""}
+        presentation = CredentialService.presentation_for_user(user)
+        return {
+            "available": presentation["configured"],
+            "suffix": presentation["suffix"],
+        }
 
 
 
@@ -422,9 +423,8 @@ class BaseController():
             if use_existing_api_token == "true":
                 # use the user existing api token
                 if BaseController.user_has_api_token() == "True":
-                    user_id = toolkit.g.userobj.id
-                    api_token_obj = PublishApiToken()
-                    api_token = api_token_obj.get_by_user(id=user_id).api_token                   
+                    record = CredentialService.record_for_user(toolkit.current_user)
+                    api_token = record.api_token
                    
                 else:
                     return BaseController._error_response(
@@ -438,22 +438,7 @@ class BaseController():
                         "Invalid request", "A destination API token is required.", 400
                     )
                 if save_api_token == "true":
-                    # delete the old one if exist
-                    if BaseController.user_has_api_token() == "True":
-                        user_id = toolkit.g.userobj.id
-                        api_token_obj = PublishApiToken()
-                        api_token_record = api_token_obj.get_by_user(id=user_id)
-                        api_token_record.delete()
-                        api_token_record.commit()
-
-                    # save the api token
-                    api_token_obj = PublishApiToken(
-                        api_token=api_token,
-                        user_id=toolkit.g.userobj.id,
-                        target_ckan=Helper.get_target_public_url(),
-                        created_at=_time.now()
-                     )
-                    api_token_obj.save()
+                    CredentialService.save_for_user(toolkit.current_user, api_token)
 
             if not api_token or not api_token.strip():
                 return BaseController._error_response(
@@ -802,9 +787,8 @@ class BaseController():
             if use_existing_token == "true":
                 # use the user existing api token
                 if BaseController.user_has_api_token() == "True":
-                    user_id = toolkit.g.userobj.id
-                    api_token_obj = PublishApiToken()
-                    api_token = api_token_obj.get_by_user(id=user_id).api_token   
+                    record = CredentialService.record_for_user(toolkit.current_user)
+                    api_token = record.api_token
 
             header = {"Authorization": api_token}
             try:
@@ -912,13 +896,9 @@ class BaseController():
             Check a user has api token in database or not.
         '''
 
-        if hasattr(toolkit.g, 'user'):
-            if toolkit.g.user:
-                user_id = toolkit.g.userobj.id
-                api_token_obj = PublishApiToken()
-                if not api_token_obj.get_by_user(user_id):
-                    return str(False)
-                return str(True)
+        user = toolkit.current_user
+        if user and not getattr(user, "is_anonymous", False):
+            return str(bool(CredentialService.record_for_user(user)))
         
         return toolkit.abort(404, "")
     
