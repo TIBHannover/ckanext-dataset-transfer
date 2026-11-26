@@ -71,3 +71,59 @@ class CredentialService(object):
         if records:
             records[0].commit()
         return bool(records)
+
+    @classmethod
+    def test_for_user(cls, user, token=None):
+        """Test a stored or one-request LUH token without returning it."""
+        from ckanext.dataset_transfer.controllers.base import BaseController, RemoteAPIError
+
+        candidate = token.strip() if isinstance(token, str) else ""
+        if not candidate:
+            record = cls.record_for_user(user)
+            candidate = record.api_token.strip() if record and record.api_token else ""
+        if not candidate:
+            return {
+                "repository": "luh", "valid": False,
+                "error": "credential_missing",
+                "message": "No LUH destination API token is configured.",
+            }
+        organization = Helper.get_organization_id()
+        if not organization:
+            return {
+                "repository": "luh", "valid": False,
+                "error": "destination_not_configured",
+                "message": "The LUH destination organization is not configured.",
+            }
+        headers = {"Authorization": candidate}
+        try:
+            organization_result = BaseController._remote_json(
+                "get", "organization_show", headers=headers, params={"id": organization}
+            ).get("result") or {}
+            authorized = BaseController._remote_json(
+                "get", "organization_list_for_user", headers=headers,
+                params={"permission": "create_dataset"},
+            ).get("result") or []
+        except RemoteAPIError:
+            return {
+                "repository": "luh", "valid": False,
+                "error": "connection_failed",
+                "message": "LUH connection failed. Verify the token and destination configuration.",
+            }
+        allowed_ids = {
+            item.get("id") for item in authorized if isinstance(item, dict)
+        } | {
+            item.get("name") for item in authorized if isinstance(item, dict)
+        }
+        if organization_result.get("id") not in allowed_ids and organization_result.get("name") not in allowed_ids:
+            return {
+                "repository": "luh", "valid": False,
+                "error": "insufficient_permission",
+                "message": "The token cannot create datasets in the configured LUH organization.",
+            }
+        return {
+            "repository": "luh", "valid": True,
+            "organization": {
+                "id": organization_result.get("id") or organization_result.get("name"),
+                "name": organization_result.get("title") or organization_result.get("name") or organization,
+            },
+        }

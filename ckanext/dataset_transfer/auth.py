@@ -8,4 +8,7 @@ def get_auth_functions():
     return {name: _authenticated for name in (
         "dataset_transfer_targets", "dataset_transfer_validate",
         "dataset_transfer_publish", "dataset_transfer_status",
+        "dataset_transfer_radar_metadata_schema",
+        "dataset_transfer_credential_status", "dataset_transfer_credential_save",
+        "dataset_transfer_credential_delete", "dataset_transfer_credential_test",
     )}

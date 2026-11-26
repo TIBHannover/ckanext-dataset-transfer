@@ -213,3 +213,90 @@ def test_connection_check_requires_create_dataset_permission(app, monkeypatch):
     html = response.get_data(as_text=True)
     assert "cannot create datasets" in html
     assert "connection-test-secret" not in html
+
+
+@pytest.mark.usefixtures("credential_db")
+def test_credential_action_status_save_replace_delete_and_user_isolation(app):
+    import ckan.tests.factories as factories
+
+    owner = factories.UserWithToken()
+    other = factories.UserWithToken()
+    status_url = "/api/3/action/dataset_transfer_credential_status"
+    save_url = "/api/3/action/dataset_transfer_credential_save"
+    delete_url = "/api/3/action/dataset_transfer_credential_delete"
+
+    initial = app.post(status_url, json={}, headers=_headers(owner)).json["result"]
+    assert initial == {"repository": "luh", "configured": False, "suffix": "", "masked_token": ""}
+
+    saved = app.post(save_url, json={
+        "luh_api_token": "owner-action-secret-1234", "confirm_save": True,
+    }, headers=_headers(owner)).json["result"]
+    assert saved["configured"] is True
+    assert saved["masked_token"].endswith("1234")
+    assert "owner-action-secret" not in str(saved)
+
+    foreign = app.post(status_url, json={}, headers=_headers(other)).json["result"]
+    assert foreign["configured"] is False
+
+    app.post(save_url, json={
+        "luh_api_token": "replacement-5678", "confirm_save": True,
+    }, headers=_headers(owner), status=409)
+    replaced = app.post(save_url, json={
+        "luh_api_token": "replacement-5678", "confirm_save": True,
+        "replace_existing": True,
+    }, headers=_headers(owner)).json["result"]
+    assert replaced["masked_token"].endswith("5678")
+    assert "replacement" not in str(replaced)
+
+    deleted = app.post(delete_url, json={"confirm_delete": True}, headers=_headers(owner)).json["result"]
+    assert deleted["configured"] is False
+
+
+@pytest.mark.usefixtures("credential_db")
+def test_credential_actions_require_authentication_and_explicit_confirmation(app):
+    app.post("/api/3/action/dataset_transfer_credential_status", json={}, status=403)
+    import ckan.tests.factories as factories
+    user = factories.UserWithToken()
+    app.post("/api/3/action/dataset_transfer_credential_save", json={
+        "luh_api_token": "must-not-save",
+    }, headers=_headers(user), status=409)
+    app.post("/api/3/action/dataset_transfer_credential_delete", json={}, headers=_headers(user), status=409)
+
+
+@pytest.mark.usefixtures("credential_db")
+def test_credential_test_action_accepts_temporary_token_without_storing_it(app, monkeypatch):
+    import ckan.plugins.toolkit as toolkit
+    import ckan.tests.factories as factories
+    from ckanext.dataset_transfer.controllers.base import BaseController
+
+    user = factories.UserWithToken()
+    monkeypatch.setitem(toolkit.config, "ckanext.dataset_transfer.target_organization", "target-org")
+
+    def fake_remote(method, action, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "temporary-test-secret"
+        if action == "organization_show":
+            return {"result": {"id": "target-id", "name": "target-org", "title": "Target Org"}}
+        return {"result": [{"id": "target-id", "name": "target-org"}]}
+
+    monkeypatch.setattr(BaseController, "_remote_json", fake_remote)
+    response = app.post("/api/3/action/dataset_transfer_credential_test", json={
+        "luh_api_token": "temporary-test-secret",
+    }, headers=_headers(user))
+    assert response.json["result"]["valid"] is True
+    assert "temporary-test-secret" not in response.get_data(as_text=True)
+    status = app.post(
+        "/api/3/action/dataset_transfer_credential_status", json={}, headers=_headers(user)
+    ).json["result"]
+    assert status["configured"] is False
+
+
+def test_radar_metadata_schema_action_is_authenticated_and_exposes_fixed_policy(app):
+    import ckan.tests.factories as factories
+    app.post("/api/3/action/dataset_transfer_radar_metadata_schema", json={}, status=403)
+    user = factories.UserWithToken()
+    result = app.post(
+        "/api/3/action/dataset_transfer_radar_metadata_schema", json={}, headers=_headers(user)
+    ).json["result"]
+    assert result["fixed"]["resource_type"] == "Dataset"
+    assert result["fixed"]["required_subject_area"] == "Engineering"
+    assert "CC BY 4.0 Attribution" in result["vocabularies"]["rights"]
