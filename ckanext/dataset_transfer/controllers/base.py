@@ -340,6 +340,13 @@ class BaseController():
                     400,
                 )
 
+            if not Helper.target_enabled(publish_target):
+                return BaseController._error_response(
+                    "Destination disabled",
+                    "The requested publication target is disabled.",
+                    400,
+                )
+
             PublishedDataset.acquire_publish_lock(dataset["id"], publish_target)
             existing_transfer = PublishedDataset.get_by_dataset_and_target(
                 dataset["id"], publish_target

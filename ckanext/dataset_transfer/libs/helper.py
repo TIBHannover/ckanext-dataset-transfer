@@ -11,6 +11,8 @@ import ckan.plugins.toolkit as toolkit
 TARGET_ORGANIZATION_CONFIG = "ckanext.dataset_transfer.target_organization"
 TARGET_API_URL_CONFIG = "ckanext.dataset_transfer.target_api_url"
 TARGET_PUBLIC_URL_CONFIG = "ckanext.dataset_transfer.target_public_url"
+LUH_ENABLED_CONFIG = "ckanext.dataset_transfer.luh.enabled"
+RADAR_ENABLED_CONFIG = "ckanext.dataset_transfer.radar.enabled"
 DEFAULT_TARGET_API_URL = "https://data.uni-hannover.de/api/3/action/"
 DEFAULT_TARGET_PUBLIC_URL = "https://data.uni-hannover.de/"
 
@@ -18,6 +20,25 @@ log = logging.getLogger(__name__)
 
 
 class Helper():
+
+    @staticmethod
+    def target_enabled(target):
+        key = {"luh": LUH_ENABLED_CONFIG, "radar": RADAR_ENABLED_CONFIG}.get(target)
+        if not key:
+            return False
+        value = toolkit.config.get(key)
+        if value is None:
+            return target == "luh"
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+    @staticmethod
+    def publication_targets():
+        return [
+            {"id": "radar", "name": "RADAR4Ing", "enabled": Helper.target_enabled("radar")},
+            {"id": "luh", "name": "LUH Research Data Repository", "enabled": Helper.target_enabled("luh")},
+        ]
 
 
     '''

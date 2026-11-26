@@ -10,6 +10,8 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
     plugins.implements(plugins.IConfigurer)
     plugins.implements(plugins.IBlueprint)
     plugins.implements(plugins.ITemplateHelpers)
+    plugins.implements(plugins.IActions)
+    plugins.implements(plugins.IAuthFunctions)
 
     # IConfigurer
 
@@ -62,4 +64,13 @@ class DatasetTransferPlugin(plugins.SingletonPlugin):
                 'get_transfer_status': BaseController.get_transfer_status,
                 'get_org_name': BaseController.which_sfb,
                 'get_target_public_url': Helper.get_target_public_url,
+                'dataset_transfer_target_enabled': Helper.target_enabled,
         }
+
+    def get_actions(self):
+        from ckanext.dataset_transfer import actions
+        return actions.get_actions()
+
+    def get_auth_functions(self):
+        from ckanext.dataset_transfer import auth
+        return auth.get_auth_functions()

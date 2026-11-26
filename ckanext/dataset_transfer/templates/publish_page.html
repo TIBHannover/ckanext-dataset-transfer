@@ -14,8 +14,8 @@
         <h3 class="publish-section-heading"><label for="publish_target">{{ _('Publish target') }}</label></h3>
         <select class="form-control" id="publish_target" name="publish_target">
           <option value="" selected>{{ _('Select a publish target') }}</option>
-          <option value="luh">{{ _('LUH data repository') }}</option>
-          <option value="radar">{{ _('RADAR4Ing') }}</option>
+          {% if h.dataset_transfer_target_enabled('luh') %}<option value="luh">{{ _('LUH data repository') }}</option>{% endif %}
+          {% if h.dataset_transfer_target_enabled('radar') %}<option value="radar">{{ _('RADAR4Ing') }}</option>{% endif %}
         </select>
         <p class="help-block" id="publish_target_description"
            data-initial="{{ _('Choose where to publish the dataset. The requirements of the chosen repository appear below.') }}"

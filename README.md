@@ -204,3 +204,87 @@ the dataset schema imports the other two schemas.
 ## License
 
 [AGPL](https://www.gnu.org/licenses/agpl-3.0.en.html)
+# External Publishing API
+
+The extension exposes authenticated CKAN Action API operations for clients such
+as PORE. Send a normal source-CKAN API token in the `Authorization` header. The
+token identifies the user, but does not grant extra rights: validation and
+publication require `package_update` on the source dataset. Status requires
+normal `package_show` access. Browser login and cookies are not required.
+
+Configure destinations with:
+
+```ini
+ckanext.dataset_transfer.luh.enabled = true
+ckanext.dataset_transfer.radar.enabled = true
+```
+
+LUH remains enabled when its flag is omitted for compatibility. RADAR is
+disabled by default and must be enabled explicitly on TRR375 (Docker:
+`CKANEXT__DATASET_TRANSFER__RADAR__ENABLED: "true"`). Disabled targets are
+hidden in the UI and rejected by the API. RADAR credentials remain server-side.
+LUH uses the authenticated user's already stored destination token, or the
+optional one-request `luh_api_token`; this token is never returned or persisted
+by the Action API.
+
+The examples use the configured TRR375 test URL. Verify this base URL against
+the deployment configuration before running them:
+
+```bash
+BASE=https://ckan.service.tib.eu/trr375-test
+TOKEN=YOUR_CKAN_API_TOKEN
+
+# List destinations
+curl -sS "$BASE/api/3/action/dataset_transfer_targets" \
+  -H "Authorization: $TOKEN" -H 'Content-Type: application/json' -d '{}'
+
+# Validate RADAR metadata (radar_metadata may contain reviewed metadata)
+curl -sS "$BASE/api/3/action/dataset_transfer_validate" \
+  -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"dataset_id":"test-instance-for-publish","target":"radar"}'
+
+# CREATES a RADAR destination dataset (initial RADAR state is pending publication)
+curl -sS "$BASE/api/3/action/dataset_transfer_publish" \
+  -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"dataset_id":"test-instance-for-publish","target":"radar","terms_accepted":true,"rights_confirmed":true}'
+
+# Check target-specific transfer status
+curl -sS "$BASE/api/3/action/dataset_transfer_status" \
+  -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"dataset_id":"test-instance-for-publish","target":"radar"}'
+
+# CREATES an LUH destination dataset; omit luh_api_token to use the stored token
+curl -sS "$BASE/api/3/action/dataset_transfer_publish" \
+  -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"dataset_id":"test-instance-for-publish","target":"luh","terms_accepted":true,"rights_confirmed":true,"luh_api_token":"YOUR_LUH_API_TOKEN"}'
+```
+
+`dataset_transfer_validate` returns `valid`, normalized `metadata`, `errors`,
+and `warnings` without changing either repository. `dataset_transfer_publish`
+also accepts `radar_metadata`. Consent fields must be literal JSON booleans and
+both must be `true`. Successful LUH responses report `transferred`; successful
+RADAR transfer responses report `pending_publication`, because transfer into
+RADAR is not proof of public release. `dataset_transfer_status` returns
+`not_transferred`, `transferred`, `pending_publication`, or the exact persisted
+incomplete-transfer stage.
+
+CKAN returns its standard Action API envelope (`success` and `result` or
+`error`). Expected failures include authentication/authorization errors,
+disabled or invalid targets, structured RADAR metadata errors, missing server
+configuration, missing/invalid LUH credentials, conflicts, sanitized remote
+errors, and persisted incomplete-transfer details. Reconcile incomplete or
+ambiguous destination creation before retrying; the service deliberately does
+not retry creation after timeouts.
+
+Publication remains synchronous. Large RADAR archives can exceed proxy or
+client timeouts even though transfer continues in the request worker. A future
+asynchronous version should use a durable external job queue, persisted job
+IDs, and idempotent reconciliation—not an in-process thread.
+
+No new migration is required. A rebuilt Docker-CKAN image containing this
+extension is required. After restart, verify registration with
+`/api/3/action/status_show` and an authenticated call to
+`dataset_transfer_targets`; verify the installed source/version inside the
+container with `pip show ckanext-dataset-transfer` and inspect the loaded
+`ckanext.dataset_transfer.actions` module path. Existing CKAN test overrides can
+be used with the two enable flags above.
