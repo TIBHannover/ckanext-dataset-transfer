@@ -219,13 +219,14 @@ def test_dataset_page_displays_transfer_and_repository_status(app, monkeypatch):
         "/dataset/{}".format(package["name"]),
         headers={"Authorization": sysadmin["token"]},
     )
+    response_text = response.get_data(as_text=True)
 
-    assert "Transfer status" in response.text
-    assert "Completed" in response.text
-    assert "Repository status" in response.text
-    assert "Published" in response.text
-    assert "10.80836/example" in response.text
-    assert "formal publication status is not tracked" not in response.text
+    assert "Transfer status" in response_text
+    assert "Completed" in response_text
+    assert "Repository status" in response_text
+    assert "Published" in response_text
+    assert "10.80836/example" in response_text
+    assert "formal publication status is not tracked" not in response_text
 
 
 def test_dataset_page_survives_unavailable_radar(app, monkeypatch):
@@ -249,8 +250,9 @@ def test_dataset_page_survives_unavailable_radar(app, monkeypatch):
     )
 
     response = app.get("/dataset/{}".format(package["name"]))
+    response_text = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "Transfer status" in response.text
-    assert "Temporarily unavailable" in response.text
-    assert "10.80836/example" in response.text
+    assert "Transfer status" in response_text
+    assert "Temporarily unavailable" in response_text
+    assert "10.80836/example" in response_text
