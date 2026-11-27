@@ -24,6 +24,14 @@ groups:
         description: RADAR workspace used for publication by the configured technical account.
       - key: ckanext.dataset_transfer.radar.dataset_url_template
         description: Public RADAR dataset URL containing the required {dataset_id} placeholder.
+      - key: ckanext.dataset_transfer.radar.status_cache_ttl
+        type: int
+        default: 300
+        description: Per-worker cache lifetime in seconds for read-only RADAR lifecycle status lookups.
+      - key: ckanext.dataset_transfer.radar.status_timeout
+        type: int
+        default: 10
+        description: Timeout in seconds for a read-only RADAR lifecycle status request (bounded to 1-60 seconds).
       - key: ckanext.dataset_transfer.radar.client_id
         description: Server-side RADAR technical-account client identifier. Prefer a protected environment variable.
       - key: ckanext.dataset_transfer.radar.client_secret

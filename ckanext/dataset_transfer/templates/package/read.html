@@ -10,7 +10,11 @@
                 <h4>{{ _('Transferred to repositories') }}</h4>
                 {% if transfer_status.radar %}
                   <div class="repository-transfer-status">
-                    <strong>RADAR</strong> — {{ _('Transferred; created in PENDING state (formal publication status is not tracked)') }}
+                    <strong>RADAR4Ing</strong>
+                    <div>{{ _('Transfer status') }}: {{ _('Completed') }}</div>
+                    <div>{{ _('Repository status') }}: {{ transfer_status.radar.repository_status_label or _('Temporarily unavailable') }}</div>
+                    {% if transfer_status.radar.repository_status_source == 'stale_cache' %}<div class="text-muted">{{ _('Cached status; the current RADAR status could not be retrieved.') }}</div>{% endif %}
+                    {% if transfer_status.radar.repository_status_checked_at %}<div class="text-muted">{{ _('Last checked') }}: {{ h.render_datetime(transfer_status.radar.repository_status_checked_at, with_hours=True) }}</div>{% endif %}
                     {% if transfer_status.radar.publish_time %}<div>{{ _('Transfer date') }}: {{ h.render_datetime(transfer_status.radar.publish_time, with_hours=True) }}</div>{% endif %}
                     {% if transfer_status.radar.doi %}<div>DOI: {{ transfer_status.radar.doi }}</div>{% endif %}
                     {% if transfer_status.radar.published_dataset_id %}<div>{{ _('RADAR dataset identifier') }}: {{ transfer_status.radar.published_dataset_id }}</div>{% endif %}

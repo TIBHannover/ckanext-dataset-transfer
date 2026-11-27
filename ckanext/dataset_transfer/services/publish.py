@@ -16,6 +16,7 @@ from ckanext.dataset_transfer.services.radar_metadata_mapping import (
     normalize_reviewed_metadata, validate_radar_metadata,
 )
 from ckanext.dataset_transfer.services.radar_reference_mapping import get_ckan_reference_descriptions
+from ckanext.dataset_transfer.services.radar_status import RadarStatusService
 
 
 class PublishError(Exception):
@@ -180,17 +181,33 @@ class PublishService(object):
                 "published_dataset_id": created["id"], "destination_dataset_id": created["id"]}
 
     @classmethod
-    def status(cls, dataset_id, target):
+    def status(cls, dataset_id, target, refresh=False):
         complete = PublishedDataset.get_by_dataset_and_target(dataset_id, target)
         incomplete = (PublishedDataset.get_incomplete_radar_transfer(dataset_id)
                       if target == "radar" else PublishedDataset.get_incomplete_luh_transfer(dataset_id))
         if complete:
             item = cls._record(complete)
             item["status"] = "pending_publication" if target == "radar" else "transferred"
+            item["transfer_status"] = "transferred"
         elif incomplete:
             item = cls._record(incomplete)
+            item["transfer_status"] = item["status"]
         else:
             item = {"status": "not_transferred", "doi": "", "published_url": "", "destination_dataset_id": ""}
+            item["transfer_status"] = "not_transferred"
+        item.update({
+            "repository_status": None,
+            "repository_status_raw": None,
+            "repository_status_label": None,
+            "repository_status_available": None,
+            "repository_status_source": None,
+            "repository_status_checked_at": None,
+            "repository_status_error": None,
+        })
+        if target == "radar" and item.get("destination_dataset_id"):
+            item.update(RadarStatusService.lookup(
+                item["destination_dataset_id"], refresh=refresh
+            ))
         item.update({"dataset_id": dataset_id, "target": target})
         return item
 

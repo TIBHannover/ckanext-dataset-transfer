@@ -62,7 +62,10 @@ def dataset_transfer_status(context, data_dict):
     toolkit.check_access("dataset_transfer_status", context, data_dict)
     dataset = _require_dataset(context, data_dict, permission="package_show")
     target = _target(data_dict, require_enabled=False)
-    return PublishService.status(dataset["id"], target)
+    refresh = data_dict.get("refresh", False)
+    if not isinstance(refresh, bool):
+        raise toolkit.ValidationError({"refresh": ["Must be a JSON boolean."]})
+    return PublishService.status(dataset["id"], target, refresh=refresh)
 
 
 @toolkit.side_effect_free

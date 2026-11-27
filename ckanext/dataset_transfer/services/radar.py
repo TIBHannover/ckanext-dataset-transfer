@@ -3,10 +3,12 @@
 import io
 import logging
 import os
+import re
 import time
 import zipfile
 from collections import Counter
 from pathlib import Path
+from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
 import requests
@@ -57,6 +59,47 @@ class RadarPublishError(Exception):
         self.dataset_id = dataset_id
         self.doi = doi
         self.missing = missing or []
+
+
+class RadarStatusError(Exception):
+    """A sanitized, read-only RADAR dataset-status lookup failure."""
+
+    def __init__(self, code, message):
+        super(RadarStatusError, self).__init__(message)
+        self.code = code
+
+
+RADAR_STATUS_LABELS = {
+    "PENDING": "Pending",
+    "IN_REVIEW": "In Review",
+    "PUBLISHED": "Published",
+    "ARCHIVED": "Archived",
+}
+
+
+def normalize_radar_status(raw_status):
+    """Return a stable API value and safe display label for a RADAR state."""
+    if not isinstance(raw_status, str) or not raw_status.strip():
+        raise RadarStatusError(
+            "invalid_response", "RADAR4Ing returned an invalid dataset status."
+        )
+    raw_status = raw_status.strip()[:80]
+    normalized = re.sub(r"[^A-Za-z0-9_-]+", "_", raw_status).strip("_").upper()
+    if not normalized:
+        raise RadarStatusError(
+            "invalid_response", "RADAR4Ing returned an invalid dataset status."
+        )
+    # RADAR documentation calls this state "In Review". Accept the state name
+    # used by older deployments while exposing one stable CKAN API value.
+    if normalized == "REVIEW":
+        normalized = "IN_REVIEW"
+    return {
+        "repository_status": normalized,
+        "repository_status_raw": raw_status,
+        "repository_status_label": RADAR_STATUS_LABELS.get(
+            normalized, normalized.replace("_", " ").title()
+        ),
+    }
 
 
 class RadarPublisher(object):
@@ -174,6 +217,75 @@ class RadarPublisher(object):
 
     def dataset_url(self, dataset_id):
         return self.dataset_url_template.format(dataset_id=dataset_id)
+
+    def get_dataset_status(self, dataset_id):
+        """Retrieve a RADAR dataset's current lifecycle state without mutation."""
+        if not dataset_id:
+            raise RadarStatusError(
+                "invalid_dataset_id", "A RADAR dataset identifier is required."
+            )
+        # Treat the identifier as one path segment. Although it comes from our
+        # persisted transfer record (not directly from the caller), quoting it
+        # prevents a malformed remote identifier from changing the endpoint.
+        url = self.context_url + "/api/datasets/{}".format(
+            quote(str(dataset_id), safe="")
+        )
+        try:
+            timeout = float(
+                self._setting("ckanext.dataset_transfer.radar.status_timeout", 10)
+            )
+        except (TypeError, ValueError):
+            timeout = 10
+        timeout = min(max(timeout, 1), 60)
+        try:
+            response = self._authenticated_request("get", url, timeout=timeout)
+        except requests.Timeout as error:
+            raise RadarStatusError(
+                "timeout", "RADAR4Ing dataset status lookup timed out."
+            ) from error
+        except requests.RequestException as error:
+            raise RadarStatusError(
+                "connection_error", "RADAR4Ing dataset status is temporarily unavailable."
+            ) from error
+        _log_response("RADAR dataset status lookup", response, dataset_id)
+        status_code = response.status_code
+        if status_code == 401:
+            raise RadarStatusError(
+                "authentication_failed",
+                "The configured RADAR4Ing authentication was rejected.",
+            )
+        if status_code == 403:
+            raise RadarStatusError(
+                "authorization_failed",
+                "The configured RADAR4Ing account cannot read this dataset.",
+            )
+        if status_code == 404:
+            raise RadarStatusError(
+                "dataset_not_found", "The RADAR4Ing dataset was not found."
+            )
+        if status_code == 429:
+            raise RadarStatusError(
+                "rate_limited", "RADAR4Ing is temporarily rate limiting requests."
+            )
+        if status_code >= 500:
+            raise RadarStatusError(
+                "service_unavailable", "RADAR4Ing is temporarily unavailable."
+            )
+        if not 200 <= status_code < 300:
+            raise RadarStatusError(
+                "request_failed", "RADAR4Ing dataset status lookup failed."
+            )
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise RadarStatusError(
+                "invalid_response", "RADAR4Ing returned an invalid dataset response."
+            ) from error
+        if not isinstance(payload, dict):
+            raise RadarStatusError(
+                "invalid_response", "RADAR4Ing returned an invalid dataset response."
+            )
+        return normalize_radar_status(payload.get("state"))
 
     def _authenticated_request(self, method, url, **kwargs):
         """Send an authenticated request, refreshing once after a 401."""

@@ -33,6 +33,7 @@ from ckanext.dataset_transfer.services.radar_metadata_mapping import (
 from ckanext.dataset_transfer.services.radar_reference_mapping import (
     get_ckan_reference_descriptions,
 )
+from ckanext.dataset_transfer.services.radar_status import RadarStatusService
 from datetime import datetime as _time
 
 
@@ -886,6 +887,12 @@ class BaseController():
             if item["target"] in (
                 "luh", "luh_incomplete", "radar", "radar_incomplete"
             ):
+                if item["target"].startswith("radar") and item.get(
+                    "published_dataset_id"
+                ):
+                    item.update(RadarStatusService.lookup(
+                        item["published_dataset_id"], refresh=False
+                    ))
                 status[item["target"]] = item
             else:
                 status["legacy"].append(item)

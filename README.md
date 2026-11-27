@@ -190,6 +190,153 @@ uses Redis and does not require an OAuth database migration.
 Automated tests use mock token and RADAR API responses and never contact real
 RADAR or LUH endpoints.
 
+## RADAR Dataset Lifecycle Status Synchronization
+
+A completed transfer and formal RADAR publication are separate facts. The
+extension keeps the existing local transfer status (for example `transferred`,
+`pending_publication`, `resource_upload_failure`, or another persisted
+incomplete stage) and supplements it with the current RADAR lifecycle state.
+The existence of a reserved DOI is not treated as proof of publication.
+
+For transferred RADAR datasets, CKAN performs the documented read-only
+`GET <radar-context>/api/datasets/{dataset_id}` request. The dataset identifier
+is taken only from CKAN's persisted transfer record, the base URL is taken only
+from `ckanext.dataset_transfer.radar.context_url`, and authentication reuses the
+server-side `RadarTokenProvider` technical account. Callers supply only their
+CKAN API token; RADAR credentials and bearer tokens are never returned.
+
+The known RADAR states are displayed as `Pending`, `In Review`, `Published`,
+and `Archived`. RADAR's `REVIEW` state is exposed consistently as
+`IN_REVIEW`; `IN_REVIEW` is also accepted for compatibility. An unknown,
+non-empty state is preserved and converted to a safe human-readable label—it
+is never silently changed to `PENDING`.
+
+The CKAN dataset page shows transfer completion separately from repository
+status and retains the transfer date, DOI, RADAR identifier, and destination
+link. A RADAR outage does not prevent the page from rendering. With no prior
+value it shows `Temporarily unavailable`; if an older valid value exists, it is
+shown explicitly as cached together with its last successful check time.
+
+### Action API
+
+`dataset_transfer_status` remains backward compatible: `dataset_id`, `target`,
+`status`, `doi`, `published_url`, and `destination_dataset_id` are unchanged.
+The following fields are additive:
+
+- `transfer_status`: the local transfer result, independent of publication.
+- `repository_status`: normalized RADAR state, or `null` when unavailable or
+  for LUH.
+- `repository_status_raw`: state spelling received from RADAR.
+- `repository_status_label`: display-safe label.
+- `repository_status_available`: whether the latest attempted check succeeded.
+- `repository_status_source`: `radar_api`, `cache`, `stale_cache`, or
+  `unavailable`.
+- `repository_status_checked_at`: UTC time of the successful live lookup (or
+  attempted lookup when no cached value exists).
+- `repository_status_error`: sanitized machine-readable failure code, or
+  `null`.
+
+Request a cached-or-live result (the default):
+
+```bash
+curl -sS -X POST \
+  "${CKAN_URL}/api/3/action/dataset_transfer_status" \
+  -H "Authorization: ${CKAN_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"dataset_id\":\"${DATASET_ID}\",\"target\":\"radar\"}"
+```
+
+Force a fresh, still read-only RADAR request with the literal JSON boolean
+`refresh: true`:
+
+```bash
+curl -sS -X POST \
+  "${CKAN_URL}/api/3/action/dataset_transfer_status" \
+  -H "Authorization: ${CKAN_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"dataset_id\":\"${DATASET_ID}\",\"target\":\"radar\",\"refresh\":true}" \
+  | python3 -m json.tool
+```
+
+An in-review result has this shape inside CKAN's standard `result` envelope:
+
+```json
+{
+  "dataset_id": "pore-web-app-test-3",
+  "target": "radar",
+  "status": "pending_publication",
+  "transfer_status": "transferred",
+  "repository_status": "IN_REVIEW",
+  "repository_status_raw": "REVIEW",
+  "repository_status_label": "In Review",
+  "repository_status_available": true,
+  "repository_status_source": "radar_api",
+  "repository_status_checked_at": "2026-11-26T16:30:00Z",
+  "repository_status_error": null,
+  "doi": "10.80836/yxa0acjqn40v9f28",
+  "published_url": "https://test.radar-service.eu/radar/en/dataset/yxa0acjqn40v9f28",
+  "destination_dataset_id": "yxa0acjqn40v9f28"
+}
+```
+
+`PENDING`, `PUBLISHED`, and `ARCHIVED` use the same structure with labels
+`Pending`, `Published`, and `Archived`. When RADAR is unavailable and no cached
+value exists, `repository_status` and `repository_status_raw` are `null`, the
+label is `Temporarily unavailable`, `repository_status_available` is `false`,
+the source is `unavailable`, and `repository_status_error` contains a sanitized
+code such as `timeout`, `authentication_failed`, `dataset_not_found`,
+`rate_limited`, `invalid_response`, or `service_unavailable`. Raw RADAR error
+bodies are not exposed.
+
+LUH requests do not contact RADAR. They retain their existing response and add
+`transfer_status`; all `repository_status*` fields are `null`.
+
+### Cache, configuration, and operation
+
+Successful lookups are held in a bounded, process-local cache keyed by RADAR
+context URL and dataset identifier. The default lifetime is 300 seconds and
+the cache contains at most 512 entries per CKAN worker. `refresh: false` uses a
+fresh cached entry; `refresh: true` bypasses it. A failed refresh does not
+overwrite the last valid state and returns it with source `stale_cache` and
+`repository_status_available: false`.
+
+Optional settings are:
+
+```ini
+ckanext.dataset_transfer.radar.status_cache_ttl = 300
+ckanext.dataset_transfer.radar.status_timeout = 10
+```
+
+The status HTTP timeout is bounded to 1–60 seconds. No database migration,
+queue, Redis service, or new credential configuration is required. Restart
+CKAN after installing the updated extension or changing configuration. No
+frontend asset build is needed. A release deployment using an immutable CKAN
+image must rebuild that image so it contains this extension version; the
+existing Docker override can be used for test deployment.
+
+For a TRR375 test-instance check:
+
+```bash
+export CKAN_URL="https://ckan.service.tib.eu/trr375-test"
+read -rsp "CKAN API token: " CKAN_API_TOKEN
+echo
+export DATASET_ID="pore-web-app-test-3"
+
+curl -sS -X POST \
+  "${CKAN_URL}/api/3/action/dataset_transfer_status" \
+  -H "Authorization: ${CKAN_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"dataset_id\":\"${DATASET_ID}\",\"target\":\"radar\",\"refresh\":true}" \
+  | python3 -m json.tool
+```
+
+Open `${CKAN_URL}/dataset/${DATASET_ID}` and verify the same lifecycle label.
+For lifecycle-transition testing, use a non-production RADAR dataset, change it
+through an allowed step such as Pending to In Review, and repeat the API call
+with `refresh: true`. Test outages only with mocks or controlled test
+configuration. For LUH compatibility, repeat the request with `target: luh`
+and a suitable LUH test dataset.
+
 The generated descriptive metadata XML is validated locally against the bundled
 RADAR v9.3 descriptive schema, uploaded to RADAR, and then checked with RADAR's
 `/metadata/validate` endpoint. To override the bundled schema path, set:
